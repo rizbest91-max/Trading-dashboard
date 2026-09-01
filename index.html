@@ -144,7 +144,7 @@
 
 <script>
 const DEFAULT_COINS = ["BTC", "ETH", "SOL", "BNB", "ADA", "XRP"];
-const LONG_WINDOW = 30;
+const LONG_WINDOW = 96; // 24 hours of 15m candles — wider zones, fewer whipsaw exits
 const REFRESH_MS = 30000;
 const LS_COINS = "tm2_coins", LS_TOGGLES = "tm2_toggles", LS_ENGINE = "tm2_engine";
 
@@ -271,38 +271,57 @@ function runEngineStep() {
 
       if (acc.position) {
         const p = acc.position;
-        let exitReason = null, exitPrice = null, exitTime = null;
-
-        // Scan every 15m candle since the trade opened (not just the latest price)
-        // so a brief spike through the stop or target isn't missed between refreshes.
         const sinceIdx = s.times.findIndex(t => t >= p.openedAt);
         const startIdx = sinceIdx === -1 ? s.times.length - 1 : sinceIdx;
+
+        // Scan every 15m candle since the trade (or since the last partial close) —
+        // not just the latest price — so brief spikes aren't missed between refreshes.
         for (let i = startIdx; i < s.closes.length; i++) {
           const hi = s.highs[i], lo = s.lows[i];
-          if (p.side === "Long") {
-            if (lo <= p.stop) { exitReason = "Stop-loss hit"; exitPrice = p.stop; exitTime = s.times[i]; break; }
-            if (hi >= p.target) { exitReason = "Take-profit hit"; exitPrice = p.target; exitTime = s.times[i]; break; }
+          const candleTime = s.times[i];
+
+          // Stage 1: take partial profit at the halfway point, then move stop to breakeven
+          if (!p.tp1Hit) {
+            const hitTp1 = p.side === "Long" ? hi >= p.tp1 : lo <= p.tp1;
+            const hitStop = p.side === "Long" ? lo <= p.stop : hi >= p.stop;
+            if (hitStop && !hitTp1) {
+              closeFullPosition(acc, p, p.stop, "Stop-loss hit", candleTime, engine);
+              break;
+            }
+            if (hitTp1) {
+              const halfNotional = p.fullNotional * 0.5;
+              const movePct = p.side === "Long" ? (p.tp1 - p.entry) / p.entry : (p.entry - p.tp1) / p.entry;
+              const grossPnl = movePct * halfNotional;
+              const fees = halfNotional * engine.feePct * 2;
+              const netPnl = grossPnl - fees;
+              const halfMargin = p.margin * 0.5;
+              acc.cash += halfMargin + netPnl;
+              acc.trades.unshift({
+                coin, bot: bot.key, side: p.side, entry: p.entry, stop: p.stop, target: p.tp1,
+                leverage: p.leverage, margin: halfMargin, notional: halfNotional, riskReward: p.riskReward,
+                reason: p.reason + " (partial, 1st half)", exitPrice: p.tp1, exitReason: "Partial take-profit (halfway)",
+                closedAt: candleTime, grossPnl, fees, netPnl, balanceAfter: acc.cash, result: netPnl >= 0 ? "Win" : "Loss",
+              });
+              p.notional = p.fullNotional * 0.5;
+              p.margin = p.margin * 0.5;
+              p.stop = p.entry; // move stop to breakeven for the remaining half
+              p.tp1Hit = true;
+              p.remainingFraction = 0.5;
+              continue; // keep scanning remaining candles for the second half
+            }
           } else {
-            if (hi >= p.stop) { exitReason = "Stop-loss hit"; exitPrice = p.stop; exitTime = s.times[i]; break; }
-            if (lo <= p.target) { exitReason = "Take-profit hit"; exitPrice = p.target; exitTime = s.times[i]; break; }
+            // Stage 2: remaining half exits at breakeven stop or the original target
+            const hitStop = p.side === "Long" ? lo <= p.stop : hi >= p.stop;
+            const hitTarget = p.side === "Long" ? hi >= p.target : lo <= p.target;
+            if (hitStop) { closeFullPosition(acc, p, p.stop, "Breakeven stop hit (2nd half)", candleTime, engine); break; }
+            if (hitTarget) { closeFullPosition(acc, p, p.target, "Take-profit hit (2nd half)", candleTime, engine); break; }
           }
         }
-        if (!exitReason) {
+
+        if (acc.position) {
           const sig = botSignal(bot.key, s.indicators);
-          if (p.side === "Long" && sig === "bear") { exitReason = "Signal reversed"; exitPrice = s.price; exitTime = Date.now(); }
-          if (p.side === "Short" && sig === "bull") { exitReason = "Signal reversed"; exitPrice = s.price; exitTime = Date.now(); }
-        }
-        if (exitReason) {
-          const movePct = p.side === "Long" ? (exitPrice - p.entry) / p.entry : (p.entry - exitPrice) / p.entry;
-          const grossPnl = movePct * p.notional;
-          const fees = p.notional * engine.feePct * 2;
-          const netPnl = grossPnl - fees;
-          acc.cash += p.margin + netPnl;
-          acc.trades.unshift({
-            coin, bot: bot.key, ...p, exitPrice, exitReason, closedAt: exitTime || Date.now(),
-            grossPnl, fees, netPnl, balanceAfter: acc.cash, result: netPnl >= 0 ? "Win" : "Loss",
-          });
-          acc.position = null;
+          const reversed = (p.side === "Long" && sig === "bear") || (p.side === "Short" && sig === "bull");
+          if (reversed) closeFullPosition(acc, p, s.price, "Signal reversed", Date.now(), engine);
         }
       } else {
         const sig = botSignal(bot.key, s.indicators);
@@ -315,15 +334,24 @@ function runEngineStep() {
         const stop = side === "Long" ? s.buyZoneLow : s.sellZoneHigh;
         const target = side === "Long" ? s.sellZoneHigh : s.buyZoneLow;
         if (!stop || !target || stop === entry) return;
+        // Skip trades where the recent range is too tight to give a real edge —
+        // avoids constant whipsaw entries/exits on choppy, low-priced coins.
+        const stopDistPct = Math.abs(entry - stop) / entry;
+        if (stopDistPct < 0.008) return; // require at least ~0.8% room to the stop
 
-        const notional = acc.cash * engine.leverage;
-        const margin = acc.cash;
+        const notionalFromLeverage = acc.cash * engine.leverage;
+        const riskCapFraction = 0.20; // never risk more than 20% of this pot on one trade
+        const notionalFromRiskCap = (acc.cash * riskCapFraction) / stopDistPct;
+        const notional = Math.min(notionalFromLeverage, notionalFromRiskCap);
+        const margin = notional / engine.leverage;
         if (margin <= 0) return;
+        const tp1 = entry + (target - entry) * 0.5; // halfway point — first partial take-profit
         const rr = Math.abs(target - entry) / Math.abs(entry - stop || 1);
 
-        acc.cash = 0;
+        acc.cash -= margin;
         acc.position = {
-          side, entry, stop, target, leverage: engine.leverage, margin, notional,
+          coin, bot: bot.key, side, entry, stop, target, tp1, tp1Hit: false, remainingFraction: 1,
+          leverage: engine.leverage, margin, notional, fullNotional: notional,
           riskReward: rr, reason: bot.label + " signal", openedAt: Date.now(),
         };
       }
@@ -332,6 +360,20 @@ function runEngineStep() {
   saveEngine();
 }
 function accEquity(acc) { return acc.position ? acc.cash + acc.position.margin : acc.cash; }
+function closeFullPosition(acc, p, exitPrice, exitReason, exitTime, engine) {
+  const movePct = p.side === "Long" ? (exitPrice - p.entry) / p.entry : (p.entry - exitPrice) / p.entry;
+  const grossPnl = movePct * p.notional;
+  const fees = p.notional * engine.feePct * 2;
+  const netPnl = grossPnl - fees;
+  acc.cash += p.margin + netPnl;
+  acc.trades.unshift({
+    coin: p.coin, bot: p.bot, side: p.side, entry: p.entry, stop: p.stop, target: p.target,
+    leverage: p.leverage, margin: p.margin, notional: p.notional, riskReward: p.riskReward,
+    reason: p.reason + (p.tp1Hit ? " (2nd half)" : ""), exitPrice, exitReason, closedAt: exitTime || Date.now(),
+    grossPnl, fees, netPnl, balanceAfter: acc.cash, result: netPnl >= 0 ? "Win" : "Loss",
+  });
+  acc.position = null;
+}
 
 function renderEngine() {
   const started = !!engine;
