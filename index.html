@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Trading Monitor</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: #0a0e17; color: #d6dde8;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    padding: 18px;
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; }
+  h1 { font-size: 20px; font-weight: 600; color: #f1f4f8; margin: 0 0 2px; }
+  .sub { color: #6b7688; font-size: 12px; margin-bottom: 12px; }
+  .toolbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+  button {
+    background: #1a2233; color: #d6dde8; border: 1px solid #2a3450;
+    padding: 8px 12px; border-radius: 6px; font-size: 12.5px; cursor: pointer;
+  }
+  button:hover { background: #232d45; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  button.primary { background: #17573f; border-color: #1f7a56; color: #baf5da; }
+  button.primary:hover { background: #1c6b4c; }
+  .status { font-size: 11.5px; color: #566078; margin: 8px 0 12px; }
+  .banner {
+    background: #2a1f0d; border: 1px solid #6b4e17; color: #e0ac4c;
+    padding: 10px 14px; border-radius: 6px; font-size: 13px; margin-bottom: 14px;
+  }
+  .section-title { font-size: 13.5px; font-weight: 600; color: #b3bccb; margin: 20px 0 9px; }
+  .toggles { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+  .toggle-chip {
+    display: flex; align-items: center; gap: 7px; background: #141b29; border: 1px solid #263049;
+    padding: 7px 11px; border-radius: 8px; font-size: 12.5px; cursor: pointer; user-select: none;
+  }
+  .toggle-chip.on { border-color: #1f7a56; background: #10241c; color: #baf5da; }
+  .toggle-chip input { display: none; }
+  .switch-dot { width: 9px; height: 9px; border-radius: 50%; background: #3d4759; }
+  .toggle-chip.on .switch-dot { background: #4ade8f; }
+
+  .coin-manager { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 4px; }
+  .chip {
+    background: #141b29; border: 1px solid #263049; padding: 5px 10px; border-radius: 20px;
+    font-size: 12px; display: flex; align-items: center; gap: 6px; color: #a9b4c4;
+  }
+  .chip button { padding: 0 4px; border: none; background: none; color: #6b7688; font-size: 13px; cursor: pointer; }
+  .add-coin { display: flex; gap: 6px; margin-top: 8px; }
+  .add-coin input {
+    background: #0a0e17; border: 1px solid #2a3450; color: #d6dde8;
+    padding: 6px 9px; border-radius: 6px; font-size: 13px; width: 90px; text-transform: uppercase;
+  }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; margin-bottom: 6px; }
+  .card { background: #10151f; border: 1px solid #1e2635; border-radius: 10px; padding: 15px; }
+  .card-top { display: flex; justify-content: space-between; align-items: flex-start; }
+  .coin-label { color: #6b7688; font-size: 12px; }
+  .price { font-size: 18px; font-weight: 600; color: #f1f4f8; font-family: monospace; }
+  .badge { font-size: 10.5px; font-weight: 700; padding: 4px 8px; border-radius: 5px; white-space: nowrap; text-align: right; }
+  .badge.up { background: #0e2a1e; color: #4ade8f; border: 1px solid #1e5c3d; }
+  .badge.down { background: #2e1420; color: #f87189; border: 1px solid #6b1f39; }
+  .badge.flat { background: #1a2233; color: #7c879c; border: 1px solid #2a3450; }
+  .agree { font-size: 10px; color: #566078; margin-top: 3px; text-align: right; }
+  .spark { width: 100%; height: 30px; margin: 8px 0; }
+
+  .zones { margin-top: 6px; font-size: 11.5px; }
+  .zone-row { display: flex; justify-content: space-between; padding: 3px 0; border-top: 1px solid #1a2130; }
+  .zone-row:first-child { border-top: none; }
+  .zone-label { color: #566078; display: flex; align-items: center; gap: 5px; }
+  .zone-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+  .zone-val { font-family: monospace; color: #d6dde8; }
+
+  .ind-list { margin-top: 8px; border-top: 1px solid #1a2130; padding-top: 8px; }
+  .ind-row { display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; padding: 4px 0; }
+  .ind-name { color: #7c879c; }
+  .ind-read { font-family: monospace; color: #93a3c2; margin-right: 6px; }
+  .ind-tag { font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; }
+  .ind-tag.bull { background: #0e2a1e; color: #4ade8f; }
+  .ind-tag.bear { background: #2e1420; color: #f87189; }
+  .ind-tag.neutral { background: #1a2233; color: #7c879c; }
+
+  .logbtn { width: 100%; margin-top: 10px; font-size: 12px; padding: 7px; }
+
+  .trade-form { background: #10151f; border: 1px solid #1e2635; border-radius: 10px; padding: 15px; margin-bottom: 18px; display: none; }
+  .trade-form.open { display: block; }
+  .trade-form h3 { margin: 0 0 10px; font-size: 14px; color: #d6dde8; }
+  .form-row { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+  .form-row label { font-size: 11px; color: #6b7688; display: block; margin-bottom: 3px; }
+  .form-row .field { flex: 1; min-width: 110px; }
+  .form-row input, .form-row select {
+    width: 100%; background: #0a0e17; border: 1px solid #2a3450; color: #d6dde8;
+    padding: 7px 9px; border-radius: 6px; font-size: 13px; font-family: monospace;
+  }
+  .form-actions { display: flex; gap: 8px; margin-top: 6px; }
+
+  .trade-card { background: #10151f; border: 1px solid #1e2635; border-radius: 10px; padding: 13px 15px; margin-bottom: 10px; }
+  .trade-top { display: flex; justify-content: space-between; align-items: center; }
+  .trade-coin { font-weight: 600; color: #f1f4f8; font-size: 14px; }
+  .trade-status { font-size: 10.5px; font-weight: 700; padding: 3px 8px; border-radius: 5px; text-transform: uppercase; }
+  .trade-status.open { background: #1a2233; color: #93a3c2; border: 1px solid #2a3450; }
+  .trade-status.target { background: #0e2a1e; color: #4ade8f; border: 1px solid #1e5c3d; }
+  .trade-status.stop { background: #2e1420; color: #f87189; border: 1px solid #6b1f39; }
+  .trade-detail { display: flex; gap: 18px; font-size: 12.5px; margin-top: 8px; flex-wrap: wrap; }
+  .trade-detail .lbl { color: #566078; }
+  .trade-detail .val { font-family: monospace; color: #d6dde8; }
+  .pnl-pos { color: #4ade8f; }
+  .pnl-neg { color: #f87189; }
+  .del-trade { font-size: 11px; color: #566078; background: none; border: none; cursor: pointer; padding: 2px 6px; }
+  .empty { color: #566078; font-size: 13px; }
+  .footnote { color: #3d4759; font-size: 12px; margin-top: 18px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="toolbar">
+    <div>
+      <h1>Trading Monitor</h1>
+      <div class="sub">Multiple strategies, shown separately · live prices · no real money</div>
+    </div>
+    <div style="display:flex; gap:8px;">
+      <button id="logTradeBtn">+ Log a trade</button>
+      <button id="refreshBtn">Refresh</button>
+    </div>
+  </div>
+  <div class="status" id="statusLine">Loading...</div>
+  <div id="banner"></div>
+
+  <div class="section-title">Strategies (tap to toggle)</div>
+  <div class="toggles" id="toggleRow"></div>
+
+  <div class="section-title">Coins</div>
+  <div class="coin-manager" id="coinChips"></div>
+  <div class="add-coin">
+    <input id="newCoinInput" placeholder="e.g. ADA" maxlength="10" />
+    <button id="addCoinBtn">Add coin</button>
+  </div>
+
+  <div class="section-title">Live coins</div>
+  <div class="grid" id="cardGrid"></div>
+
+  <div class="trade-form" id="tradeForm">
+    <h3>Log a trade idea</h3>
+    <div class="form-row">
+      <div class="field"><label>Coin</label><select id="tfCoin"></select></div>
+      <div class="field"><label>Entry price ($)</label><input id="tfEntry" type="number" step="any" placeholder="e.g. 70250" /></div>
+    </div>
+    <div class="form-row">
+      <div class="field"><label>Target price ($)</label><input id="tfTarget" type="number" step="any" placeholder="e.g. 71300" /></div>
+      <div class="field"><label>Stop-loss price ($, optional)</label><input id="tfStop" type="number" step="any" placeholder="e.g. 69500" /></div>
+    </div>
+    <div class="form-actions">
+      <button class="primary" id="tfSave">Save trade</button>
+      <button id="tfCancel">Cancel</button>
+    </div>
+  </div>
+
+  <div class="section-title">Your logged trades</div>
+  <div id="tradesList"></div>
+
+  <div class="footnote">
+    Each strategy is shown on its own — Claude doesn't blend them into one hidden score. The "agreement" line just counts how many of your active strategies currently point the same direction; it isn't a guarantee. Data and settings are saved in this browser only.
+  </div>
+</div>
+
+<script>
+const DEFAULT_COINS = ["BTC", "ETH", "SOL"];
+const LONG_WINDOW = 30;
+const REFRESH_MS = 60000;
+const LS_COINS = "tm_coins";
+const LS_TRADES = "tm_trades";
+const LS_TOGGLES = "tm_toggles";
+
+const INDICATORS = [
+  { key: "sma", label: "SMA 10/30" },
+  { key: "rsi", label: "RSI (14)" },
+  { key: "macd", label: "MACD" },
+  { key: "boll", label: "Bollinger Bands" },
+  { key: "vol", label: "Volume" },
+];
+
+let coinList = JSON.parse(localStorage.getItem(LS_COINS) || "null") || DEFAULT_COINS.slice();
+let trades = JSON.parse(localStorage.getItem(LS_TRADES) || "[]");
+let toggles = JSON.parse(localStorage.getItem(LS_TOGGLES) || "null") || { sma: true, rsi: false, macd: false, boll: false, vol: false };
+const state = {};
+
+function saveCoins() { localStorage.setItem(LS_COINS, JSON.stringify(coinList)); }
+function saveTrades() { localStorage.setItem(LS_TRADES, JSON.stringify(trades)); }
+function saveToggles() { localStorage.setItem(LS_TOGGLES, JSON.stringify(toggles)); }
+
+function sma(values, window) {
+  const out = new Array(values.length).fill(null);
+  for (let i = window - 1; i < values.length; i++) {
+    let sum = 0;
+    for (let j = i - window + 1; j <= i; j++) sum += values[j];
+    out[i] = sum / window;
+  }
+  return out;
+}
+function ema(values, period) {
+  const out = new Array(values.length).fill(null);
+  const k = 2 / (period + 1);
+  let prev = null;
+  for (let i = 0; i < values.length; i++) {
+    if (i === period - 1) {
+      let sum = 0;
+      for (let j = 0; j < period; j++) sum += values[j];
+      prev = sum / period;
+      out[i] = prev;
+    } else if (i >= period) {
+      prev = values[i] * k + prev * (1 - k);
+      out[i] = prev;
+    }
+  }
+  return out;
+}
+function computeRSI(closes, period = 14) {
+  if (closes.length < period + 1) return null;
+  let gains = 0, losses = 0;
+  for (let i = closes.length - period; i < closes.length; i++) {
+    const diff = closes[i] - closes[i - 1];
+    if (diff >= 0) gains += diff; else losses -= diff;
+  }
+  const avgGain = gains / period, avgLoss = losses / period;
+  if (avgLoss === 0) return 100;
+  const rs = avgGain / avgLoss;
+  return 100 - (100 / (1 + rs));
+}
+function computeMACD(closes) {
+  const ema12 = ema(closes, 12), ema26 = ema(closes, 26);
+  const macdLine = closes.map((_, i) => (ema12[i] !== null && ema26[i] !== null) ? ema12[i] - ema26[i] : null);
+  const validMacd = macdLine.filter(v => v !== null);
+  if (validMacd.length < 9) return { macd: null, signal: null, hist: null };
+  const signalArr = ema(validMacd, 9);
+  const macd = validMacd[validMacd.length - 1];
+  const signal = signalArr[signalArr.length - 1];
+  return { macd, signal, hist: (macd !== null && signal !== null) ? macd - signal : null };
+}
+function computeBollinger(closes, period = 20, mult = 2) {
+  if (closes.length < period) return null;
+  const slice = closes.slice(-period);
+  const mean = slice.reduce((a, b) => a + b, 0) / period;
+  const variance = slice.reduce((a, b) => a + (b - mean) ** 2, 0) / period;
+  const std = Math.sqrt(variance);
+  return { upper: mean + mult * std, lower: mean - mult * std, mid: mean };
+}
+function computeVolumeSignal(volumes, period = 20) {
+  if (volumes.length < period + 1) return null;
+  const recent = volumes.slice(-period - 1, -1);
+  const avg = recent.reduce((a, b) => a + b, 0) / recent.length;
+  const current = volumes[volumes.length - 1];
+  return { current, avg, ratio: avg ? current / avg : 1 };
+}
+function fmt(n, d = 2) {
+  if (n === null || n === undefined || Number.isNaN(n)) return "—";
+  return n.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
+}
+function decimalsFor(price) { return price > 100 ? 2 : price > 1 ? 3 : 5; }
+
+async function fetchKlines(symbol) {
+  const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}USDT&interval=1h&limit=60`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("HTTP " + res.status + " for " + symbol);
+  const raw = await res.json();
+  return {
+    closes: raw.map(k => parseFloat(k[4])),
+    volumes: raw.map(k => parseFloat(k[5])),
+    times: raw.map(k => k[0]),
+  };
+}
+function sparklineSVG(closes, color) {
+  if (!closes.length) return "";
+  const min = Math.min(...closes), max = Math.max(...closes);
+  const range = max - min || 1;
+  const w = 300, h = 30;
+  const pts = closes.map((v, i) => {
+    const x = (i / (closes.length - 1)) * w;
+    const y = h - ((v - min) / range) * h;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+    <polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.6" /></svg>`;
+}
+
+function renderToggles() {
+  document.getElementById("toggleRow").innerHTML = INDICATORS.map(ind => `
+    <div class="toggle-chip ${toggles[ind.key] ? "on" : ""}" onclick="flipToggle('${ind.key}')">
+      <span class="switch-dot"></span>${ind.label}
+    </div>`).join("");
+}
+function flipToggle(key) {
+  toggles[key] = !toggles[key];
+  saveToggles();
+  renderToggles();
+  renderCards();
+}
+
+function addCoin(ticker) {
+  ticker = ticker.trim().toUpperCase();
+  if (!ticker || coinList.includes(ticker)) return;
+  coinList.push(ticker);
+  saveCoins();
+  renderChips();
+  populateTradeCoinSelect();
+  refresh();
+}
+function removeCoin(ticker) {
+  coinList = coinList.filter(c => c !== ticker);
+  delete state[ticker];
+  saveCoins();
+  renderChips();
+  populateTradeCoinSelect();
+  renderCards();
+}
+function renderChips() {
+  document.getElementById("coinChips").innerHTML = coinList.map(t =>
+    `<span class="chip">${t} <button onclick="removeCoin('${t}')">✕</button></span>`
+  ).join("");
+}
+
+async function refresh() {
+  document.getElementById("refreshBtn").disabled = true;
+  let anySuccess = false, lastError = null;
+
+  await Promise.all(coinList.map(async (ticker) => {
+    if (!state[ticker]) state[ticker] = { closes: [], price: null };
+    try {
+      const { closes, volumes, times } = await fetchKlines(ticker);
+      anySuccess = true;
+      const i = closes.length - 1;
+      const price = closes[i];
+
+      const shortArr = sma(closes, 10), longArr = sma(closes, 30);
+      const smaSignal = (shortArr[i] !== null && longArr[i] !== null) ? (shortArr[i] > longArr[i] ? "bull" : "bear") : "neutral";
+
+      const rsiVal = computeRSI(closes, 14);
+      const rsiSignal = rsiVal === null ? "neutral" : rsiVal > 70 ? "bear" : rsiVal < 30 ? "bull" : "neutral";
+
+      const macdRes = computeMACD(closes);
+      const macdSignal = macdRes.hist === null ? "neutral" : macdRes.hist > 0 ? "bull" : "bear";
+
+      const boll = computeBollinger(closes, 20, 2);
+      const bollSignal = !boll ? "neutral" : price > boll.upper ? "bear" : price < boll.lower ? "bull" : "neutral";
+
+      const volRes = computeVolumeSignal(volumes, 20);
+      const volTag = !volRes ? "neutral" : volRes.ratio > 1.5 ? "high" : volRes.ratio < 0.5 ? "low" : "normal";
+
+      const recent = closes.slice(-LONG_WINDOW);
+      const support = Math.min(...recent), resistance = Math.max(...recent);
+      const range = resistance - support || price * 0.01;
+
+      state[ticker] = {
+        closes, price,
+        buyZoneLow: support, buyZoneHigh: support + range * 0.25,
+        sellZoneLow: resistance - range * 0.25, sellZoneHigh: resistance,
+        indicators: {
+          sma: { signal: smaSignal, reading: smaSignal === "bull" ? "Short > Long" : smaSignal === "bear" ? "Short < Long" : "—" },
+          rsi: { signal: rsiSignal, reading: rsiVal !== null ? rsiVal.toFixed(1) : "—" },
+          macd: { signal: macdSignal, reading: macdRes.hist !== null ? macdRes.hist.toFixed(2) : "—" },
+          boll: { signal: bollSignal, reading: boll ? "$" + fmt(price, decimalsFor(price)) + " vs band" : "—" },
+          vol: { signal: "neutral", reading: volRes ? (volRes.ratio).toFixed(2) + "x avg" : "—", tag: volTag },
+        },
+        error: null,
+      };
+    } catch (e) {
+      lastError = e.message;
+      if (state[ticker]) state[ticker].error = lastError;
+    }
+  }));
+
+  let tradesChanged = false;
+  trades.forEach(t => {
+    if (t.status !== "open") return;
+    const s = state[t.coin];
+    if (!s || s.price === null) return;
+    if (t.target && ((t.target >= t.entry && s.price >= t.target) || (t.target < t.entry && s.price <= t.target))) {
+      t.status = "target"; t.closedAt = Date.now(); t.closePrice = s.price; tradesChanged = true;
+    } else if (t.stop && ((t.stop < t.entry && s.price <= t.stop) || (t.stop > t.entry && s.price >= t.stop))) {
+      t.status = "stop"; t.closedAt = Date.now(); t.closePrice = s.price; tradesChanged = true;
+    }
+  });
+  if (tradesChanged) saveTrades();
+
+  document.getElementById("banner").innerHTML = anySuccess ? "" :
+    `<div class="banner">Live price fetch failed (${lastError}). Check your internet connection.</div>`;
+  document.getElementById("statusLine").textContent =
+    "Last updated " + new Date().toLocaleTimeString() + " · auto-refresh every 60s";
+  document.getElementById("refreshBtn").disabled = false;
+  renderCards();
+  renderTrades();
+}
+
+function renderCards() {
+  const grid = document.getElementById("cardGrid");
+  const activeInds = INDICATORS.filter(ind => ind.key !== "vol" && toggles[ind.key]);
+  grid.innerHTML = coinList.map(ticker => {
+    const s = state[ticker] || {};
+    const ind = s.indicators || {};
+    let bull = 0, bear = 0;
+    activeInds.forEach(a => { const sig = ind[a.key] && ind[a.key].signal; if (sig === "bull") bull++; if (sig === "bear") bear++; });
+    const overall = bull > bear ? "up" : bear > bull ? "down" : "flat";
+    const overallLabel = bull > bear ? "BUY ZONE" : bear > bull ? "SELL ZONE" : "MIXED";
+    const color = overall === "up" ? "#4ade8f" : overall === "down" ? "#f87189" : "#7c879c";
+    const d = s.price ? decimalsFor(s.price) : 2;
+
+    const indRows = INDICATORS.filter(i => toggles[i.key]).map(i => {
+      const data = ind[i.key] || {};
+      let tagClass = data.signal || "neutral";
+      let tagLabel = tagClass === "bull" ? "Bullish" : tagClass === "bear" ? "Bearish" : "Neutral";
+      if (i.key === "vol") { tagClass = "neutral"; tagLabel = data.tag === "high" ? "High" : data.tag === "low" ? "Low" : "Normal"; }
+      if (i.key === "rsi" && data.signal === "bear") tagLabel = "Overbought";
+      if (i.key === "rsi" && data.signal === "bull") tagLabel = "Oversold";
+      return `<div class="ind-row">
+        <span class="ind-name">${i.label}</span>
+        <span><span class="ind-read">${data.reading || "—"}</span><span class="ind-tag ${tagClass}">${tagLabel}</span></span>
+      </div>`;
+    }).join("");
+
+    return `
+      <div class="card">
+        <div class="card-top">
+          <div>
+            <div class="coin-label">${ticker}/USDT</div>
+            <div class="price">${s.price ? "$" + fmt(s.price, d) : "—"}</div>
+          </div>
+          <div>
+            <div class="badge ${overall}">${activeInds.length ? overallLabel : "—"}</div>
+            ${activeInds.length ? `<div class="agree">${bull > bear ? bull : bear}/${activeInds.length} agree</div>` : ""}
+          </div>
+        </div>
+        ${sparklineSVG(s.closes || [], color)}
+        <div class="zones">
+          <div class="zone-row"><span class="zone-label"><span class="zone-dot" style="background:#4ade8f"></span>Buy zone</span><span class="zone-val">${s.buyZoneLow ? "$" + fmt(s.buyZoneLow, d) + " – $" + fmt(s.buyZoneHigh, d) : "—"}</span></div>
+          <div class="zone-row"><span class="zone-label"><span class="zone-dot" style="background:#f87189"></span>Sell zone</span><span class="zone-val">${s.sellZoneLow ? "$" + fmt(s.sellZoneLow, d) + " – $" + fmt(s.sellZoneHigh, d) : "—"}</span></div>
+        </div>
+        ${indRows ? `<div class="ind-list">${indRows}</div>` : ""}
+        <button class="logbtn" onclick="openTradeForm('${ticker}')">Log a trade on ${ticker}</button>
+      </div>`;
+  }).join("");
+}
+
+function populateTradeCoinSelect() {
+  document.getElementById("tfCoin").innerHTML = coinList.map(t => `<option value="${t}">${t}</option>`).join("");
+}
+function openTradeForm(ticker) {
+  document.getElementById("tradeForm").classList.add("open");
+  if (ticker) document.getElementById("tfCoin").value = ticker;
+  document.getElementById("tradeForm").scrollIntoView({ behavior: "smooth", block: "center" });
+}
+function closeTradeForm() {
+  document.getElementById("tradeForm").classList.remove("open");
+  document.getElementById("tfEntry").value = "";
+  document.getElementById("tfTarget").value = "";
+  document.getElementById("tfStop").value = "";
+}
+function saveTrade() {
+  const coin = document.getElementById("tfCoin").value;
+  const entry = parseFloat(document.getElementById("tfEntry").value);
+  const target = parseFloat(document.getElementById("tfTarget").value);
+  const stop = parseFloat(document.getElementById("tfStop").value) || null;
+  if (!coin || !entry || !target) { alert("Coin, entry price, and target price are required."); return; }
+  trades.unshift({ id: Date.now(), coin, entry, target, stop, openedAt: Date.now(), status: "open", closedAt: null, closePrice: null });
+  saveTrades();
+  closeTradeForm();
+  renderTrades();
+}
+function deleteTrade(id) {
+  trades = trades.filter(t => t.id !== id);
+  saveTrades();
+  renderTrades();
+}
+function renderTrades() {
+  const el = document.getElementById("tradesList");
+  if (!trades.length) { el.innerHTML = `<div class="empty">No trades logged yet. Tap "Log a trade" on any coin above to start tracking one.</div>`; return; }
+  el.innerHTML = trades.map(t => {
+    const s = state[t.coin];
+    const livePrice = t.status === "open" ? (s ? s.price : null) : t.closePrice;
+    const pnl = livePrice ? ((livePrice - t.entry) / t.entry) * 100 : null;
+    const statusClass = t.status === "target" ? "target" : t.status === "stop" ? "stop" : "open";
+    const statusLabel = t.status === "target" ? "Target hit" : t.status === "stop" ? "Stop hit" : "Open";
+    const d = decimalsFor(t.entry);
+    return `
+      <div class="trade-card">
+        <div class="trade-top"><span class="trade-coin">${t.coin}</span><span class="trade-status ${statusClass}">${statusLabel}</span></div>
+        <div class="trade-detail">
+          <span><span class="lbl">Entry </span><span class="val">$${fmt(t.entry, d)}</span></span>
+          <span><span class="lbl">Target </span><span class="val">$${fmt(t.target, d)}</span></span>
+          ${t.stop ? `<span><span class="lbl">Stop </span><span class="val">$${fmt(t.stop, d)}</span></span>` : ""}
+          <span><span class="lbl">${t.status === "open" ? "Current" : "Closed at"} </span><span class="val">${livePrice ? "$" + fmt(livePrice, d) : "—"}</span></span>
+          <span><span class="lbl">P/L </span><span class="val ${pnl === null ? "" : pnl >= 0 ? "pnl-pos" : "pnl-neg"}">${pnl === null ? "—" : (pnl >= 0 ? "+" : "") + fmt(pnl, 2) + "%"}</span></span>
+          <button class="del-trade" onclick="deleteTrade(${t.id})">Delete</button>
+        </div>
+      </div>`;
+  }).join("");
+}
+
+document.getElementById("refreshBtn").addEventListener("click", refresh);
+document.getElementById("logTradeBtn").addEventListener("click", () => openTradeForm(coinList[0]));
+document.getElementById("addCoinBtn").addEventListener("click", () => {
+  const input = document.getElementById("newCoinInput");
+  addCoin(input.value);
+  input.value = "";
+});
+document.getElementById("tfSave").addEventListener("click", saveTrade);
+document.getElementById("tfCancel").addEventListener("click", closeTradeForm);
+
+renderToggles();
+renderChips();
+populateTradeCoinSelect();
+renderTrades();
+refresh();
+setInterval(refresh, REFRESH_MS);
+</script>
+</body>
+</html>
