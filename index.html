@@ -20,6 +20,12 @@
   button.danger { background: #3a1420; border-color: #6b1f39; color: #f8a8b6; }
   .status { font-size: 11.5px; color: #566078; margin: 8px 0 12px; }
   .banner { background: #2a1f0d; border: 1px solid #6b4e17; color: #e0ac4c; padding: 10px 14px; border-radius: 6px; font-size: 13px; margin-bottom: 14px; }
+  .big-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .big-box { background: #10151f; border: 2px solid #263049; border-radius: 12px; padding: 16px; text-align: center; }
+  .big-box.highlight { border-color: #1f7a56; }
+  .big-label { font-size: 11.5px; color: #7c879c; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .big-val { font-size: 26px; font-weight: 700; font-family: monospace; color: #f1f4f8; }
+  .big-val.pos { color: #4ade8f; } .big-val.neg { color: #f87189; }
   .section-title { font-size: 13.5px; font-weight: 600; color: #b3bccb; margin: 20px 0 9px; }
   .toggles { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
   .toggle-chip { display: flex; align-items: center; gap: 7px; background: #141b29; border: 1px solid #263049; padding: 8px 12px; border-radius: 8px; font-size: 12.5px; cursor: pointer; user-select: none; }
@@ -78,12 +84,13 @@
     <div>
       <h1>Trading Monitor</h1>
       <div class="sub">Each strategy trades independently with its own $ per coin · live prices · no real money</div>
-      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v7 · 2026-09-01 15:51 BST</div>
+      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v9 · 2026-09-01 17:52 BST</div>
     </div>
     <button id="refreshBtn">Refresh</button>
   </div>
   <div class="status" id="statusLine">Loading...</div>
   <div id="banner"></div>
+  <div id="bigSummary"></div>
 
   <div class="section-title">Strategies to compare (tap to enable a bot)</div>
   <div class="toggles" id="toggleRow"></div>
@@ -142,7 +149,7 @@
   <div class="grid" id="cardGrid"></div>
 
   <div class="footnote">
-    <b style="color:#93a3c2;">Build: v7 — 2026-09-01 15:51 (BST)</b> · target-room fix, trailing stop, zone-window fix<br/>
+    <b style="color:#93a3c2;">Build: v9 — 2026-09-01 17:52 (BST)</b> · fixed reward:risk ratio (1.5:1), big unrealized P/L summary<br/>
     Assumption recorded: £/$ treated as 1:1 since prices come from USDT pairs — no live FX conversion applied. Fees assumed at 0.1% per side, no funding cost modeled. Each strategy's pot per coin is fully isolated — a loss in one never affects another. Data saved only in this browser.
   </div>
 </div>
@@ -357,17 +364,17 @@ function runEngineStep() {
 
         const entry = s.price;
         const stop = side === "Long" ? s.buyZoneLow : s.sellZoneHigh;
-        const target = side === "Long" ? s.sellZoneHigh : s.buyZoneLow;
-        if (!stop || !target || stop === entry) return;
-        // Skip trades where the recent range is too tight to give a real edge —
-        // avoids constant whipsaw entries/exits on choppy, low-priced coins.
+        if (!stop || stop === entry) return;
         const stopDistPct = Math.abs(entry - stop) / entry;
-        const targetDistPct = Math.abs(target - entry) / entry;
-        // Require real room in BOTH directions — not just downside room to the stop.
-        // Without this, a trade could enter with plenty of risk but almost no
-        // profit potential (target essentially equal to entry), guaranteeing a
-        // near-instant, fee-losing exit every time.
-        if (stopDistPct < 0.012 || targetDistPct < 0.012) return;
+        if (stopDistPct < 0.012) return; // require at least ~1.2% room to the stop
+
+        // Target is now set as a multiple of the stop distance (fixed reward:risk),
+        // NOT independently from the zone high/low. Previously a trade could risk
+        // 10% to chase only 5% of potential reward — this guarantees the reward
+        // is always at least REWARD_RISK_RATIO times the risk being taken.
+        const REWARD_RISK_RATIO = 1.5;
+        const targetDistPct = stopDistPct * REWARD_RISK_RATIO;
+        const target = side === "Long" ? entry * (1 + targetDistPct) : entry * (1 - targetDistPct);
 
         const notionalFromLeverage = acc.cash * engine.leverage;
         const riskCapFraction = 0.20; // never risk more than 20% of this pot on one trade
@@ -376,7 +383,7 @@ function runEngineStep() {
         const margin = notional / engine.leverage;
         if (margin <= 0) return;
         const tp1 = entry + (target - entry) * 0.5; // halfway point — first partial take-profit
-        const rr = Math.abs(target - entry) / Math.abs(entry - stop || 1);
+        const rr = REWARD_RISK_RATIO;
 
         acc.cash -= margin;
         acc.position = {
@@ -415,8 +422,10 @@ function renderEngine() {
 
   const activeBots = BOTS.filter(b => toggles[b.key]);
   if (!started || !activeBots.length) {
+    document.getElementById("bigSummary").innerHTML = "";
     document.getElementById("compareTable").innerHTML = `<div style="color:#566078;font-size:12.5px;">${!started ? "Not running yet." : "Enable at least one strategy above."}</div>`;
     document.getElementById("totalsTable").innerHTML = "";
+    document.getElementById("openPosTable").innerHTML = "";
     document.getElementById("closedTradeTable").innerHTML = "";
     return;
   }
@@ -436,6 +445,16 @@ function renderEngine() {
   compareHtml += `</tbody></table>`;
   document.getElementById("compareTable").innerHTML = compareHtml;
 
+  // --- Big, hard-to-miss summary: unrealized P/L + available cash across everything ---
+  let totalAvailableCash = 0, totalLockedMargin = 0;
+  activeBots.forEach(b => coinList.forEach(coin => {
+    const acc = engine.bots[b.key].coins[coin];
+    if (acc) {
+      totalAvailableCash += acc.cash;
+      if (acc.position) totalLockedMargin += acc.position.margin;
+    }
+  }));
+
   const botTotals = activeBots.map(b => {
     let totalEquity = 0, totalInitial = 0;
     coinList.forEach(coin => {
@@ -454,14 +473,46 @@ function renderEngine() {
 
   // --- Currently open positions ---
   let openRows = [];
+  let totalUnrealized = 0;
   activeBots.forEach(b => coinList.forEach(coin => {
     const acc = engine.bots[b.key].coins[coin];
-    if (acc && acc.position) openRows.push({ ...acc.position, botLabel: b.label });
+    if (acc && acc.position) {
+      const p = acc.position;
+      const s = state[coin];
+      const curPrice = s ? s.price : null;
+      let unrealPnl = null;
+      if (curPrice) {
+        const movePct = p.side === "Long" ? (curPrice - p.entry) / p.entry : (p.entry - curPrice) / p.entry;
+        unrealPnl = movePct * p.notional;
+        totalUnrealized += unrealPnl;
+      }
+      openRows.push({ ...p, botLabel: b.label, curPrice, unrealPnl });
+    }
   }));
   document.getElementById("openPosTable").innerHTML = openRows.length ? `
-    <div class="trow head"><span>Strategy</span><span>Coin</span><span>Side</span><span>Entry</span><span>Stop</span><span>Target</span><span>Stage</span><span>Opened</span></div>
-    ${openRows.map(p => `<div class="trow"><span>${p.botLabel}</span><span>${p.coin}</span><span class="${p.side === "Long" ? "long-tag" : "short-tag"}">${p.side}</span><span>$${fmt(p.entry, decimalsFor(p.entry))}</span><span>$${fmt(p.stop, decimalsFor(p.stop))}</span><span>$${fmt(p.target, decimalsFor(p.target))}</span><span>${p.tp1Hit ? "2nd half" : "1st half"}</span><span>${new Date(p.openedAt).toLocaleTimeString()}</span></div>`).join("")}
+    <div class="trow head" style="grid-template-columns:75px 55px 50px 80px 75px 75px 75px 65px 75px;"><span>Strategy</span><span>Coin</span><span>Side</span><span>Entry</span><span>Current</span><span>Stop</span><span>Target</span><span>Stage</span><span>Unreal. P/L</span></div>
+    ${openRows.map(p => `<div class="trow" style="grid-template-columns:75px 55px 50px 80px 75px 75px 75px 65px 75px;"><span>${p.botLabel}</span><span>${p.coin}</span><span class="${p.side === "Long" ? "long-tag" : "short-tag"}">${p.side}</span><span>$${fmt(p.entry, decimalsFor(p.entry))}</span><span>$${p.curPrice ? fmt(p.curPrice, decimalsFor(p.curPrice)) : "—"}</span><span>$${fmt(p.stop, decimalsFor(p.stop))}</span><span>$${fmt(p.target, decimalsFor(p.target))}</span><span>${p.tp1Hit ? "2nd half" : "1st half"}</span><span class="${p.unrealPnl === null ? "" : p.unrealPnl >= 0 ? "win" : "loss"}" style="font-weight:700;">${p.unrealPnl === null ? "—" : (p.unrealPnl >= 0 ? "+" : "") + "$" + fmt(p.unrealPnl)}</span></div>`).join("")}
   ` : `<div style="color:#566078;font-size:12.5px;padding:6px 0;">Nothing open right now.</div>`;
+
+  document.getElementById("bigSummary").innerHTML = `
+    <div class="big-summary">
+      <div class="big-box highlight">
+        <div class="big-label">Unrealized P/L (open trades)</div>
+        <div class="big-val ${totalUnrealized > 0 ? "pos" : totalUnrealized < 0 ? "neg" : ""}">${openRows.length ? (totalUnrealized >= 0 ? "+" : "") + "$" + fmt(totalUnrealized) : "$0.00"}</div>
+      </div>
+      <div class="big-box">
+        <div class="big-label">Available cash (not in a trade)</div>
+        <div class="big-val">$${fmt(totalAvailableCash)}</div>
+      </div>
+      <div class="big-box">
+        <div class="big-label">Locked in open trades</div>
+        <div class="big-val">$${fmt(totalLockedMargin)}</div>
+      </div>
+      <div class="big-box">
+        <div class="big-label">Open positions</div>
+        <div class="big-val">${openRows.length}</div>
+      </div>
+    </div>`;
 
   let allTrades = [];
   activeBots.forEach(b => coinList.forEach(coin => {
