@@ -304,7 +304,10 @@ function runEngineStep() {
               });
               p.notional = p.fullNotional * 0.5;
               p.margin = p.margin * 0.5;
-              p.stop = p.entry; // move stop to breakeven for the remaining half
+              // Move stop just past breakeven (small buffer) rather than exact entry —
+              // a minor wick back shouldn't be enough to close out the trade.
+              const buffer = p.entry * 0.002; // ~0.2%
+              p.stop = p.side === "Long" ? p.entry + buffer : p.entry - buffer;
               p.tp1Hit = true;
               p.remainingFraction = 0.5;
               continue; // keep scanning remaining candles for the second half
@@ -321,7 +324,13 @@ function runEngineStep() {
         if (acc.position) {
           const sig = botSignal(bot.key, s.indicators);
           const reversed = (p.side === "Long" && sig === "bear") || (p.side === "Short" && sig === "bull");
-          if (reversed) closeFullPosition(acc, p, s.price, "Signal reversed", Date.now(), engine);
+          if (reversed) {
+            p.reverseCount = (p.reverseCount || 0) + 1;
+          } else {
+            p.reverseCount = 0;
+          }
+          // Require the reversal to hold for 2 consecutive checks (not just one noisy flip)
+          if (p.reverseCount >= 2) closeFullPosition(acc, p, s.price, "Signal reversed (confirmed)", Date.now(), engine);
         }
       } else {
         const sig = botSignal(bot.key, s.indicators);
@@ -337,7 +346,7 @@ function runEngineStep() {
         // Skip trades where the recent range is too tight to give a real edge —
         // avoids constant whipsaw entries/exits on choppy, low-priced coins.
         const stopDistPct = Math.abs(entry - stop) / entry;
-        if (stopDistPct < 0.008) return; // require at least ~0.8% room to the stop
+        if (stopDistPct < 0.012) return; // require at least ~1.2% room to the stop
 
         const notionalFromLeverage = acc.cash * engine.leverage;
         const riskCapFraction = 0.20; // never risk more than 20% of this pot on one trade
