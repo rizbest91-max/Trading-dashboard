@@ -313,10 +313,21 @@ function runEngineStep() {
               continue; // keep scanning remaining candles for the second half
             }
           } else {
-            // Stage 2: remaining half exits at breakeven stop or the original target
+            // Stage 2: trail the stop as price moves further in our favor,
+            // instead of sitting at a fixed breakeven+buffer the whole time.
+            if (p.side === "Long" && hi > (p.bestPrice || p.entry)) {
+              p.bestPrice = hi;
+              const trailStop = hi - (hi - p.entry) * 0.5; // lock in half the move so far
+              if (trailStop > p.stop) p.stop = trailStop;
+            }
+            if (p.side === "Short" && lo < (p.bestPrice || p.entry)) {
+              p.bestPrice = lo;
+              const trailStop = lo + (p.entry - lo) * 0.5;
+              if (trailStop < p.stop) p.stop = trailStop;
+            }
             const hitStop = p.side === "Long" ? lo <= p.stop : hi >= p.stop;
             const hitTarget = p.side === "Long" ? hi >= p.target : lo <= p.target;
-            if (hitStop) { closeFullPosition(acc, p, p.stop, "Breakeven stop hit (2nd half)", candleTime, engine); break; }
+            if (hitStop) { closeFullPosition(acc, p, p.stop, "Trailing stop hit (2nd half)", candleTime, engine); break; }
             if (hitTarget) { closeFullPosition(acc, p, p.target, "Take-profit hit (2nd half)", candleTime, engine); break; }
           }
         }
@@ -346,7 +357,12 @@ function runEngineStep() {
         // Skip trades where the recent range is too tight to give a real edge —
         // avoids constant whipsaw entries/exits on choppy, low-priced coins.
         const stopDistPct = Math.abs(entry - stop) / entry;
-        if (stopDistPct < 0.012) return; // require at least ~1.2% room to the stop
+        const targetDistPct = Math.abs(target - entry) / entry;
+        // Require real room in BOTH directions — not just downside room to the stop.
+        // Without this, a trade could enter with plenty of risk but almost no
+        // profit potential (target essentially equal to entry), guaranteeing a
+        // near-instant, fee-losing exit every time.
+        if (stopDistPct < 0.012 || targetDistPct < 0.012) return;
 
         const notionalFromLeverage = acc.cash * engine.leverage;
         const riskCapFraction = 0.20; // never risk more than 20% of this pot on one trade
@@ -521,7 +537,7 @@ async function refresh() {
       const macdSignal = macdRes.hist === null ? "neutral" : macdRes.hist > 0 ? "bull" : "bear";
       const boll = computeBollinger(closes, 20, 2);
       const bollSignal = !boll ? "neutral" : price > boll.upper ? "bear" : price < boll.lower ? "bull" : "neutral";
-      const recent = closes.slice(-LONG_WINDOW);
+      const recent = closes.slice(-LONG_WINDOW - 1, -1); // exclude the current, still-forming candle
       const support = Math.min(...recent), resistance = Math.max(...recent);
       const range = resistance - support || price * 0.01;
 
