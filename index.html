@@ -84,7 +84,7 @@
     <div>
       <h1>Trading Monitor</h1>
       <div class="sub">Each strategy trades independently with its own $ per coin · live prices · no real money</div>
-      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v16 · 2026-09-02 11:19 BST</div>
+      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v18 · 2026-09-02 12:08 BST</div>
     </div>
     <button id="refreshBtn">Refresh</button>
   </div>
@@ -130,6 +130,14 @@
           <option value="15" selected>$15</option>
           <option value="25">$25</option>
           <option value="35">$35</option>
+        </select>
+      </span>
+      <span><label>Close trade after</label>
+        <select id="engMaxHold">
+          <option value="12">12 hours</option>
+          <option value="24" selected>24 hours</option>
+          <option value="48">48 hours</option>
+          <option value="9999">No limit</option>
         </select>
       </span>
     </div>
@@ -190,7 +198,7 @@
   <div class="grid" id="cardGrid"></div>
 
   <div class="footnote">
-    <b style="color:#93a3c2;">Build: v16 — 2026-09-02 11:19 (BST)</b> · single exit (stop or TP3 only, no partials), min-profit filter, scanner now excludes stablecoins / thin listings / low-volume / no-futures coins<br/>
+    <b style="color:#93a3c2;">Build: v18 — 2026-09-02 12:08 (BST)</b> · entry score recorded + shown, reachability check (skips targets beyond the coin's normal daily range), 24h max trade duration, age column<br/>
     Assumption recorded: £/$ treated as 1:1 since prices come from USDT pairs — no live FX conversion applied. Fees assumed at 0.1% per side, no funding cost modeled. Each strategy's pot per coin is fully isolated — a loss in one never affects another. Data saved only in this browser.
   </div>
 </div>
@@ -321,12 +329,13 @@ function startEngine() {
   const leverage = parseFloat(document.getElementById("engLeverage").value);
   const allowShorts = document.getElementById("engShorts").value === "1";
   const minProfit = parseFloat(document.getElementById("engMinProfit")?.value) || 15;
+  const maxHoldHours = parseFloat(document.getElementById("engMaxHold")?.value) || 24;
   const bots = {};
   BOTS.forEach(b => {
     bots[b.key] = { coins: {} };
     coinList.forEach(c => { bots[b.key].coins[c] = { cash: perCoinCapital, initial: perCoinCapital, position: null, trades: [] }; });
   });
-  engine = { startedAt: Date.now(), perCoinCapital, leverage, allowShorts, minProfit, feePct: 0.001, bots };
+  engine = { startedAt: Date.now(), perCoinCapital, leverage, allowShorts, minProfit, maxHoldHours, feePct: 0.001, bots };
   saveEngine();
   renderEngine();
 }
@@ -378,6 +387,16 @@ function runEngineStep() {
           if (hitTarget) { closeFullPosition(acc, p, p.target, "TP3 hit", candleTime, engine); break; }
         }
 
+        // Max duration: if a trade hasn't resolved within the time limit, close it
+        // at the current price. Without this, an unreachable target leaves capital
+        // locked indefinitely and the strategy never generates comparable results.
+        if (acc.position) {
+          const maxHoldMs = (engine.maxHoldHours || 24) * 60 * 60 * 1000;
+          if (Date.now() - p.openedAt > maxHoldMs) {
+            closeFullPosition(acc, p, s.price, `Timed out (${engine.maxHoldHours || 24}h)`, Date.now(), engine);
+          }
+        }
+
         if (acc.position) {
           const sig = botSignal(bot.key, s.indicators);
           const reversed = (p.side === "Long" && sig === "bear") || (p.side === "Short" && sig === "bull");
@@ -421,10 +440,23 @@ function runEngineStep() {
         const minProfit = engine.minProfit !== undefined ? engine.minProfit : 15;
         if (expectedNet < minProfit) return;
 
+        // Reachability check: is TP3 a move this coin actually makes?
+        // Compare the required distance against the coin's own average daily
+        // range. A 21% target on a coin that typically moves 6% a day will
+        // never be hit — the trade just sits open tying up capital until the
+        // stop eventually catches it.
+        const tp3MovePct = stopDistPct * 2.5;
+        const avgDailyRangePct = s.avgDailyRangePct;
+        if (avgDailyRangePct && tp3MovePct > avgDailyRangePct * 1.5) return;
+
         const rr = 2.5;
+        // Record the scanner's score for this coin/direction at the moment of entry,
+        // so we can later check whether high-score entries actually perform better.
+        let entryScore = null;
+        try { entryScore = scoreDirection(s, side === "Long" ? "long" : "short"); } catch (e) { /* scorer unavailable */ }
         acc.cash -= margin;
         acc.position = {
-          coin, bot: bot.key, side, entry, stop, target,
+          coin, bot: bot.key, side, entry, stop, target, entryScore,
           leverage: engine.leverage, margin, notional, expectedNet,
           riskReward: rr, reason: bot.label + " signal", openedAt: Date.now(),
         };
@@ -442,6 +474,7 @@ function closeFullPosition(acc, p, exitPrice, exitReason, exitTime, engine) {
   acc.cash += p.margin + netPnl;
   acc.trades.unshift({
     coin: p.coin, bot: p.bot, side: p.side, entry: p.entry, stop: p.stop, target: p.target,
+    entryScore: p.entryScore,
     leverage: p.leverage, margin: p.margin, notional: p.notional, riskReward: p.riskReward,
     reason: p.reason, exitPrice, exitReason, closedAt: exitTime || Date.now(),
     grossPnl, fees, netPnl, balanceAfter: acc.cash, result: netPnl >= 0 ? "Win" : "Loss",
@@ -528,8 +561,14 @@ function renderEngine() {
     }
   }));
   document.getElementById("openPosTable").innerHTML = openRows.length ? `
-    <div class="trow head" style="grid-template-columns:75px 55px 50px 80px 75px 75px 75px 65px 75px;"><span>Strategy</span><span>Coin</span><span>Side</span><span>Entry</span><span>Current</span><span>Stop</span><span>Target</span><span>If TP3</span><span>Unreal. P/L</span></div>
-    ${openRows.map(p => `<div class="trow" style="grid-template-columns:75px 55px 50px 80px 75px 75px 75px 65px 75px;"><span>${p.botLabel}</span><span>${p.coin}</span><span class="${p.side === "Long" ? "long-tag" : "short-tag"}">${p.side}</span><span>$${fmt(p.entry, decimalsFor(p.entry))}</span><span>$${p.curPrice ? fmt(p.curPrice, decimalsFor(p.curPrice)) : "—"}</span><span>$${fmt(p.stop, decimalsFor(p.stop))}</span><span>$${fmt(p.target, decimalsFor(p.target))}</span><span style="color:#7c879c;">${p.expectedNet ? "$" + fmt(p.expectedNet, 0) : "—"}</span><span class="${p.unrealPnl === null ? "" : p.unrealPnl >= 0 ? "win" : "loss"}" style="font-weight:700;">${p.unrealPnl === null ? "—" : (p.unrealPnl >= 0 ? "+" : "") + "$" + fmt(p.unrealPnl)}</span></div>`).join("")}
+    <div class="trow head" style="grid-template-columns:75px 50px 45px 45px 75px 70px 70px 70px 55px 50px 70px;"><span>Strategy</span><span>Coin</span><span>Side</span><span>Score</span><span>Entry</span><span>Current</span><span>Stop</span><span>Target</span><span>If TP3</span><span>Age</span><span>Unreal. P/L</span></div>
+    ${openRows.map(p => {
+      const ageH = (Date.now() - p.openedAt) / 3600000;
+      const ageStr = ageH < 1 ? Math.round(ageH * 60) + "m" : ageH.toFixed(1) + "h";
+      const maxH = engine.maxHoldHours || 24;
+      const ageColor = ageH > maxH * 0.75 ? "#e0ac4c" : "#7c879c";
+      return `<div class="trow" style="grid-template-columns:75px 50px 45px 45px 75px 70px 70px 70px 55px 50px 70px;"><span>${p.botLabel}</span><span>${p.coin}</span><span class="${p.side === "Long" ? "long-tag" : "short-tag"}">${p.side}</span><span style="font-weight:700; color:${p.entryScore == null ? "#566078" : p.entryScore >= 70 ? "#4ade8f" : p.entryScore >= 65 ? "#e0ac4c" : "#f87189"};">${p.entryScore == null ? "—" : p.entryScore}</span><span>$${fmt(p.entry, decimalsFor(p.entry))}</span><span>$${p.curPrice ? fmt(p.curPrice, decimalsFor(p.curPrice)) : "—"}</span><span>$${fmt(p.stop, decimalsFor(p.stop))}</span><span>$${fmt(p.target, decimalsFor(p.target))}</span><span style="color:#7c879c;">${p.expectedNet ? "$" + fmt(p.expectedNet, 0) : "—"}</span><span style="color:${ageColor};">${ageStr}</span><span class="${p.unrealPnl === null ? "" : p.unrealPnl >= 0 ? "win" : "loss"}" style="font-weight:700;">${p.unrealPnl === null ? "—" : (p.unrealPnl >= 0 ? "+" : "") + "$" + fmt(p.unrealPnl)}</span></div>`;
+    }).join("")}
   ` : `<div style="color:#566078;font-size:12.5px;padding:6px 0;">Nothing open right now.</div>`;
 
   document.getElementById("bigSummary").innerHTML = `
@@ -565,8 +604,8 @@ function renderEngine() {
   allTrades.sort((a, b) => b.closedAt - a.closedAt);
   const recent = allTrades.slice(0, 20);
   document.getElementById("closedTradeTable").innerHTML = recent.length ? `
-    <div class="trow head"><span>Strategy</span><span>Coin</span><span>Side</span><span>Entry</span><span>Exit</span><span>Reason</span><span>Net</span><span>Balance</span></div>
-    ${recent.map(t => `<div class="trow"><span>${t.botLabel}</span><span>${t.coin}</span><span class="${t.side === "Long" ? "long-tag" : "short-tag"}">${t.side}</span><span>$${fmt(t.entry, decimalsFor(t.entry))}</span><span>$${fmt(t.exitPrice, decimalsFor(t.exitPrice))}</span><span>${t.exitReason}</span><span class="${t.result === "Win" ? "win" : "loss"}">$${fmt(t.netPnl)}</span><span>$${fmt(t.balanceAfter)}</span></div>`).join("")}
+    <div class="trow head" style="grid-template-columns:75px 55px 50px 50px 80px 80px 90px 70px 75px;"><span>Strategy</span><span>Coin</span><span>Side</span><span>Score</span><span>Entry</span><span>Exit</span><span>Reason</span><span>Net</span><span>Balance</span></div>
+    ${recent.map(t => `<div class="trow" style="grid-template-columns:75px 55px 50px 50px 80px 80px 90px 70px 75px;"><span>${t.botLabel}</span><span>${t.coin}</span><span class="${t.side === "Long" ? "long-tag" : "short-tag"}">${t.side}</span><span style="font-weight:700; color:${t.entryScore == null ? "#566078" : t.entryScore >= 70 ? "#4ade8f" : t.entryScore >= 65 ? "#e0ac4c" : "#f87189"};">${t.entryScore == null ? "—" : t.entryScore}</span><span>$${fmt(t.entry, decimalsFor(t.entry))}</span><span>$${fmt(t.exitPrice, decimalsFor(t.exitPrice))}</span><span>${t.exitReason}</span><span class="${t.result === "Win" ? "win" : "loss"}">$${fmt(t.netPnl)}</span><span>$${fmt(t.balanceAfter)}</span></div>`).join("")}
   ` : `<div style="color:#566078;font-size:12.5px;padding:6px 0;">No closed trades yet.</div>`;
 }
 
@@ -599,6 +638,29 @@ function generateReport() {
   out += `Gross P/L before fees: ${allGross >= 0 ? "+" : ""}$${fmt(allGross)}\nTotal fees paid: -$${fmt(allFees)}\nNet P/L after fees: ${allNet >= 0 ? "+" : ""}$${fmt(allNet)}\n`;
   if (allGross > 0) out += `Fees consumed ${fmt((allFees / allGross) * 100, 0)}% of gross profit.\n`;
 
+  out += `\n=== PERFORMANCE BY ENTRY SCORE ===\n`;
+  out += `Does a higher scanner score actually mean a better trade? This is the evidence.\n`;
+  const allForScore = [];
+  activeBots.forEach(b => coinList.forEach(coin => {
+    const acc = engine.bots[b.key].coins[coin];
+    if (acc) allForScore.push(...acc.trades);
+  }));
+  const bands = [
+    { label: "80-100 (very strong)", min: 80, max: 101 },
+    { label: "70-79  (strong)", min: 70, max: 80 },
+    { label: "65-69  (borderline)", min: 65, max: 70 },
+    { label: "Below 65 (weak)", min: 0, max: 65 },
+  ];
+  bands.forEach(band => {
+    const ts = allForScore.filter(t => t.entryScore != null && t.entryScore >= band.min && t.entryScore < band.max);
+    if (!ts.length) { out += `${band.label}: no trades\n`; return; }
+    const w = ts.filter(t => t.result === "Win").length;
+    const net = ts.reduce((a, t) => a + (t.netPnl || 0), 0);
+    out += `${band.label}: ${ts.length} trades | ${w}W/${ts.length - w}L (${fmt(w / ts.length * 100, 0)}% win) | net $${fmt(net)} | avg $${fmt(net / ts.length)}\n`;
+  });
+  const unscored = allForScore.filter(t => t.entryScore == null).length;
+  if (unscored) out += `(${unscored} older trades have no score recorded)\n`;
+
   out += `\n=== BY COIN, BY STRATEGY ===\n`;
   coinList.forEach(coin => {
     out += `\n${coin}:\n`;
@@ -624,7 +686,7 @@ function generateReport() {
   if (!allTrades.length) out += "No trades closed yet.\n";
   allTrades.forEach(t => {
     const pd = decimalsFor(t.entry);
-    out += `[${new Date(t.closedAt).toLocaleString()}] ${t.botLabel} | ${t.coin} ${t.side} | Entry $${fmt(t.entry, pd)} Stop $${fmt(t.stop, pd)} Target $${fmt(t.target, pd)} | Lev ${t.leverage}x | R:R ${fmt(t.riskReward, 1)} | Exit $${fmt(t.exitPrice, pd)} (${t.exitReason}) | Gross $${fmt(t.grossPnl)} Fees $${fmt(t.fees)} Net $${fmt(t.netPnl)} | Balance after $${fmt(t.balanceAfter)} | ${t.result}\n`;
+    out += `[${new Date(t.closedAt).toLocaleString()}] ${t.botLabel} | ${t.coin} ${t.side} | Score at entry: ${t.entryScore == null ? "n/a" : t.entryScore} | Entry $${fmt(t.entry, pd)} Stop $${fmt(t.stop, pd)} Target $${fmt(t.target, pd)} | Lev ${t.leverage}x | R:R ${fmt(t.riskReward, 1)} | Exit $${fmt(t.exitPrice, pd)} (${t.exitReason}) | Gross $${fmt(t.grossPnl)} Fees $${fmt(t.fees)} Net $${fmt(t.netPnl)} | Balance after $${fmt(t.balanceAfter)} | ${t.result}\n`;
   });
 
   return out;
@@ -679,6 +741,19 @@ async function analyzeCoin(ticker) {
   const sma192Arr = smaArr(closes, Math.min(192, closes.length - 1));
   const sma192 = sma192Arr[sma192Arr.length - 1];
   const positionInRange = range ? (price - support) / range : 0.5;
+
+  // Average daily range over the last few days (96 x 15m candles = 1 day),
+  // used to judge whether a target is a move this coin realistically makes.
+  let avgDailyRangePct = null;
+  if (closes.length >= 96) {
+    const dayRanges = [];
+    for (let d = closes.length - 96; d >= 0 && dayRanges.length < 5; d -= 96) {
+      const dayHigh = Math.max(...highs.slice(d, d + 96));
+      const dayLow = Math.min(...lows.slice(d, d + 96));
+      if (dayLow > 0) dayRanges.push((dayHigh - dayLow) / dayLow);
+    }
+    if (dayRanges.length) avgDailyRangePct = dayRanges.reduce((a, b) => a + b, 0) / dayRanges.length;
+  }
   const funding = await fetchFundingRate(ticker);
   // No perpetual futures market is a decent proxy for "not a serious trading
   // pair" — and it also means the funding-rate signal would be silently blank.
@@ -688,7 +763,7 @@ async function analyzeCoin(ticker) {
     closes, highs, lows, times, price,
     buyZoneLow: support, buyZoneHigh: support + range * 0.25,
     sellZoneLow: resistance - range * 0.25, sellZoneHigh: resistance,
-    sma96, sma192, positionInRange, fundingRate: funding ? funding.fundingRate : null,
+    sma96, sma192, positionInRange, avgDailyRangePct, fundingRate: funding ? funding.fundingRate : null,
     indicators: {
       sma: { signal: smaSignal, reading: smaSignal === "bull" ? "Short > Long" : smaSignal === "bear" ? "Short < Long" : "—" },
       rsi: { signal: rsiSignal, reading: rsiVal !== null ? rsiVal.toFixed(1) : "—", value: rsiVal },
