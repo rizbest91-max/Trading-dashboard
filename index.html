@@ -84,7 +84,7 @@
     <div>
       <h1>Trading Monitor</h1>
       <div class="sub">Each strategy trades independently with its own $ per coin · live prices · no real money</div>
-      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v15 · 2026-09-02 09:09 BST</div>
+      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v16 · 2026-09-02 11:19 BST</div>
     </div>
     <button id="refreshBtn">Refresh</button>
   </div>
@@ -123,6 +123,14 @@
       </span>
       <span><label>Allow shorts</label>
         <select id="engShorts"><option value="1" selected>Yes</option><option value="0">No</option></select>
+      </span>
+      <span><label>Min profit to bother (TP3, after fees)</label>
+        <select id="engMinProfit">
+          <option value="8">$8</option>
+          <option value="15" selected>$15</option>
+          <option value="25">$25</option>
+          <option value="35">$35</option>
+        </select>
       </span>
     </div>
 
@@ -182,7 +190,7 @@
   <div class="grid" id="cardGrid"></div>
 
   <div class="footnote">
-    <b style="color:#93a3c2;">Build: v15 — 2026-09-02 09:09 (BST)</b> · micro-price display fix (PEPE etc.), 3s timeout on funding-rate fetch so it can't stall the engine<br/>
+    <b style="color:#93a3c2;">Build: v16 — 2026-09-02 11:19 (BST)</b> · single exit (stop or TP3 only, no partials), min-profit filter, scanner now excludes stablecoins / thin listings / low-volume / no-futures coins<br/>
     Assumption recorded: £/$ treated as 1:1 since prices come from USDT pairs — no live FX conversion applied. Fees assumed at 0.1% per side, no funding cost modeled. Each strategy's pot per coin is fully isolated — a loss in one never affects another. Data saved only in this browser.
   </div>
 </div>
@@ -312,12 +320,13 @@ function startEngine() {
   const perCoinCapital = parseFloat(document.getElementById("engCapital").value) || 100;
   const leverage = parseFloat(document.getElementById("engLeverage").value);
   const allowShorts = document.getElementById("engShorts").value === "1";
+  const minProfit = parseFloat(document.getElementById("engMinProfit")?.value) || 15;
   const bots = {};
   BOTS.forEach(b => {
     bots[b.key] = { coins: {} };
     coinList.forEach(c => { bots[b.key].coins[c] = { cash: perCoinCapital, initial: perCoinCapital, position: null, trades: [] }; });
   });
-  engine = { startedAt: Date.now(), perCoinCapital, leverage, allowShorts, feePct: 0.001, bots };
+  engine = { startedAt: Date.now(), perCoinCapital, leverage, allowShorts, minProfit, feePct: 0.001, bots };
   saveEngine();
   renderEngine();
 }
@@ -356,45 +365,17 @@ function runEngineStep() {
 
         // Scan every 15m candle since the trade opened — not just the latest
         // price — so brief spikes aren't missed between refreshes.
+        // Single exit only: stop-loss or TP3. No partial closes, no breakeven
+        // protection — one entry, one exit, one fee pair per trade.
         for (let i = startIdx; i < s.closes.length; i++) {
           const hi = s.highs[i], lo = s.lows[i];
           const candleTime = s.times[i];
           const isLong = p.side === "Long";
-          const reached = (lvl) => isLong ? hi >= lvl : lo <= lvl;
           const hitStop = isLong ? lo <= p.stop : hi >= p.stop;
+          const hitTarget = isLong ? hi >= p.target : lo <= p.target;
 
-          // Stop always checked first — a loser exits in one shot (one fee)
-          if (hitStop) {
-            closeFullPosition(acc, p, p.stop, p.protectedStop ? "Trailing stop hit" : "Stop-loss hit", candleTime, engine);
-            break;
-          }
-
-          // TP1 (1.0× risk): no selling — just move stop to breakeven+buffer and start trailing.
-          // Free "insurance" point, costs nothing in fees.
-          if (!p.protectedStop && reached(p.tp1)) {
-            const buffer = p.entry * 0.003;
-            p.stop = isLong ? p.entry + buffer : p.entry - buffer;
-            p.protectedStop = true;
-            p.bestPrice = isLong ? hi : lo;
-          }
-
-          // Trail once protected — locks in roughly half of the gain beyond entry
-          if (p.protectedStop) {
-            if (isLong && hi > p.bestPrice) { p.bestPrice = hi; const t = hi - (hi - p.entry) * 0.5; if (t > p.stop) p.stop = t; }
-            if (!isLong && lo < p.bestPrice) { p.bestPrice = lo; const t = lo + (p.entry - lo) * 0.5; if (t < p.stop) p.stop = t; }
-          }
-
-          // TP2 (1.5× risk): close 40% and lock it in
-          if (!p.tp2Done && reached(p.tp2)) {
-            closePartialPosition(acc, p, p.tp2, 0.40, "TP2 hit — 40% closed", candleTime, engine);
-            p.tp2Done = true;
-          }
-
-          // TP3 (2.5× risk): close the remaining 60%
-          if (p.tp2Done && reached(p.tp3)) {
-            closeFullPosition(acc, p, p.tp3, "TP3 hit — remaining 60% closed", candleTime, engine);
-            break;
-          }
+          if (hitStop) { closeFullPosition(acc, p, p.stop, "Stop-loss hit", candleTime, engine); break; }
+          if (hitTarget) { closeFullPosition(acc, p, p.target, "TP3 hit", candleTime, engine); break; }
         }
 
         if (acc.position) {
@@ -421,13 +402,8 @@ function runEngineStep() {
         const stopDistPct = Math.abs(entry - stop) / entry;
         if (stopDistPct < 0.012) return; // require at least ~1.2% room to the stop
 
-        // Three-tier targets, all as multiples of the stop distance:
-        //   TP1 = 1.0× risk → protect only (move stop to breakeven, start trailing)
-        //   TP2 = 1.5× risk → close 40%
-        //   TP3 = 2.5× risk → close remaining 60%
-        const lvl = (mult) => side === "Long" ? entry * (1 + stopDistPct * mult) : entry * (1 - stopDistPct * mult);
-        const tp1 = lvl(1.0), tp2 = lvl(1.5), tp3 = lvl(2.5);
-        const target = tp3; // "target" shown in tables = the final TP3
+        // Single target only: TP3 at 2.5x the stop distance. One exit, one fee pair.
+        const target = side === "Long" ? entry * (1 + stopDistPct * 2.5) : entry * (1 - stopDistPct * 2.5);
 
         const notionalFromLeverage = acc.cash * engine.leverage;
         const riskCapFraction = 0.20; // never risk more than 20% of this pot on one trade
@@ -435,12 +411,21 @@ function runEngineStep() {
         const notional = Math.min(notionalFromLeverage, notionalFromRiskCap);
         const margin = notional / engine.leverage;
         if (margin <= 0) return;
-        const rr = 2.5; // full reward:risk if TP3 is reached
+
+        // Minimum-profit filter: if hitting TP3 wouldn't clear a worthwhile
+        // amount after fees, the setup isn't worth the risk — skip it.
+        // A $2-5 payoff doesn't justify risking the stop-loss.
+        const expectedGross = stopDistPct * 2.5 * notional;
+        const expectedFees = notional * engine.feePct * 2;
+        const expectedNet = expectedGross - expectedFees;
+        const minProfit = engine.minProfit !== undefined ? engine.minProfit : 15;
+        if (expectedNet < minProfit) return;
+
+        const rr = 2.5;
         acc.cash -= margin;
         acc.position = {
-          coin, bot: bot.key, side, entry, stop, target, tp1, tp2, tp3,
-          protectedStop: false, tp2Done: false,
-          leverage: engine.leverage, margin, notional,
+          coin, bot: bot.key, side, entry, stop, target,
+          leverage: engine.leverage, margin, notional, expectedNet,
           riskReward: rr, reason: bot.label + " signal", openedAt: Date.now(),
         };
       }
@@ -449,24 +434,6 @@ function runEngineStep() {
   saveEngine();
 }
 function accEquity(acc) { return acc.position ? acc.cash + acc.position.margin : acc.cash; }
-function closePartialPosition(acc, p, exitPrice, fraction, exitReason, exitTime, engine) {
-  // Closes `fraction` of the open position, logs it, and shrinks the remainder.
-  const partNotional = p.notional * fraction;
-  const partMargin = p.margin * fraction;
-  const movePct = p.side === "Long" ? (exitPrice - p.entry) / p.entry : (p.entry - exitPrice) / p.entry;
-  const grossPnl = movePct * partNotional;
-  const fees = partNotional * engine.feePct * 2;
-  const netPnl = grossPnl - fees;
-  acc.cash += partMargin + netPnl;
-  acc.trades.unshift({
-    coin: p.coin, bot: p.bot, side: p.side, entry: p.entry, stop: p.stop, target: p.target,
-    leverage: p.leverage, margin: partMargin, notional: partNotional, riskReward: p.riskReward,
-    reason: p.reason, exitPrice, exitReason, closedAt: exitTime || Date.now(),
-    grossPnl, fees, netPnl, balanceAfter: acc.cash, result: netPnl >= 0 ? "Win" : "Loss",
-  });
-  p.notional -= partNotional;
-  p.margin -= partMargin;
-}
 function closeFullPosition(acc, p, exitPrice, exitReason, exitTime, engine) {
   const movePct = p.side === "Long" ? (exitPrice - p.entry) / p.entry : (p.entry - exitPrice) / p.entry;
   const grossPnl = movePct * p.notional;
@@ -561,8 +528,8 @@ function renderEngine() {
     }
   }));
   document.getElementById("openPosTable").innerHTML = openRows.length ? `
-    <div class="trow head" style="grid-template-columns:75px 55px 50px 80px 75px 75px 75px 65px 75px;"><span>Strategy</span><span>Coin</span><span>Side</span><span>Entry</span><span>Current</span><span>Stop</span><span>Target</span><span>Stage</span><span>Unreal. P/L</span></div>
-    ${openRows.map(p => `<div class="trow" style="grid-template-columns:75px 55px 50px 80px 75px 75px 75px 65px 75px;"><span>${p.botLabel}</span><span>${p.coin}</span><span class="${p.side === "Long" ? "long-tag" : "short-tag"}">${p.side}</span><span>$${fmt(p.entry, decimalsFor(p.entry))}</span><span>$${p.curPrice ? fmt(p.curPrice, decimalsFor(p.curPrice)) : "—"}</span><span>$${fmt(p.stop, decimalsFor(p.stop))}</span><span>$${fmt(p.target, decimalsFor(p.target))}</span><span>${p.tp2Done ? "TP2 done, riding to TP3" : p.protectedStop ? "Protected (past TP1)" : "Open"}</span><span class="${p.unrealPnl === null ? "" : p.unrealPnl >= 0 ? "win" : "loss"}" style="font-weight:700;">${p.unrealPnl === null ? "—" : (p.unrealPnl >= 0 ? "+" : "") + "$" + fmt(p.unrealPnl)}</span></div>`).join("")}
+    <div class="trow head" style="grid-template-columns:75px 55px 50px 80px 75px 75px 75px 65px 75px;"><span>Strategy</span><span>Coin</span><span>Side</span><span>Entry</span><span>Current</span><span>Stop</span><span>Target</span><span>If TP3</span><span>Unreal. P/L</span></div>
+    ${openRows.map(p => `<div class="trow" style="grid-template-columns:75px 55px 50px 80px 75px 75px 75px 65px 75px;"><span>${p.botLabel}</span><span>${p.coin}</span><span class="${p.side === "Long" ? "long-tag" : "short-tag"}">${p.side}</span><span>$${fmt(p.entry, decimalsFor(p.entry))}</span><span>$${p.curPrice ? fmt(p.curPrice, decimalsFor(p.curPrice)) : "—"}</span><span>$${fmt(p.stop, decimalsFor(p.stop))}</span><span>$${fmt(p.target, decimalsFor(p.target))}</span><span style="color:#7c879c;">${p.expectedNet ? "$" + fmt(p.expectedNet, 0) : "—"}</span><span class="${p.unrealPnl === null ? "" : p.unrealPnl >= 0 ? "win" : "loss"}" style="font-weight:700;">${p.unrealPnl === null ? "—" : (p.unrealPnl >= 0 ? "+" : "") + "$" + fmt(p.unrealPnl)}</span></div>`).join("")}
   ` : `<div style="color:#566078;font-size:12.5px;padding:6px 0;">Nothing open right now.</div>`;
 
   document.getElementById("bigSummary").innerHTML = `
@@ -693,6 +660,9 @@ async function refresh() {
 // Shared analysis used for BOTH your tracked coins and the wider market scan.
 async function analyzeCoin(ticker) {
   const { closes, highs, lows, times } = await fetchKlines(ticker);
+  // Reject newly listed / thin coins: we ask for 200 candles, so anything
+  // returning far fewer hasn't traded long enough for reliable indicators.
+  if (closes.length < 150) throw new Error(ticker + ": insufficient price history");
   const i = closes.length - 1, price = closes[i];
   const shortArr = smaArr(closes, 10), longArr = smaArr(closes, 30);
   const smaSignal = (shortArr[i] !== null && longArr[i] !== null) ? (shortArr[i] > longArr[i] ? "bull" : "bear") : "neutral";
@@ -710,6 +680,9 @@ async function analyzeCoin(ticker) {
   const sma192 = sma192Arr[sma192Arr.length - 1];
   const positionInRange = range ? (price - support) / range : 0.5;
   const funding = await fetchFundingRate(ticker);
+  // No perpetual futures market is a decent proxy for "not a serious trading
+  // pair" — and it also means the funding-rate signal would be silently blank.
+  if (!funding && !coinList.includes(ticker)) throw new Error(ticker + ": no futures market");
 
   return {
     closes, highs, lows, times, price,
@@ -736,11 +709,21 @@ async function fetchTopCoinsByVolume(limit) {
   const res = await fetch("https://api.binance.com/api/v3/ticker/24hr");
   if (!res.ok) throw new Error("ticker fetch failed");
   const all = await res.json();
-  const skip = ["USDC", "FDUSD", "TUSD", "BUSD", "DAI", "USDP", "EUR", "GBP", "TRY", "BRL"];
+  const MIN_QUOTE_VOLUME = 50e6; // $50M+ 24h volume — cuts tokenized stocks and low-cap noise
+  const MIN_24H_RANGE_PCT = 0.5; // under 0.5% daily range = pegged/stablecoin, nothing to trade
+
   return all
     .filter(t => t.symbol.endsWith("USDT"))
     .filter(t => !/UP|DOWN|BULL|BEAR/.test(t.symbol.replace("USDT", "")))
-    .filter(t => !skip.includes(t.symbol.replace("USDT", "")))
+    .filter(t => parseFloat(t.quoteVolume) >= MIN_QUOTE_VOLUME)
+    .filter(t => {
+      // Stablecoin / pegged-asset detection by actual behaviour, not a hardcoded list.
+      // Catches USD1, USDC, XAUT-style pegs and anything new automatically.
+      const high = parseFloat(t.highPrice), low = parseFloat(t.lowPrice);
+      if (!high || !low) return false;
+      const rangePct = ((high - low) / low) * 100;
+      return rangePct >= MIN_24H_RANGE_PCT;
+    })
     .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
     .slice(0, limit)
     .map(t => t.symbol.replace("USDT", ""));
