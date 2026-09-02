@@ -84,7 +84,7 @@
     <div>
       <h1>Trading Monitor</h1>
       <div class="sub">Each strategy trades independently with its own $ per coin · live prices · no real money</div>
-      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v14 · 2026-09-02 10:40 BST</div>
+      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v15 · 2026-09-02 09:09 BST</div>
     </div>
     <button id="refreshBtn">Refresh</button>
   </div>
@@ -182,7 +182,7 @@
   <div class="grid" id="cardGrid"></div>
 
   <div class="footnote">
-    <b style="color:#93a3c2;">Build: v14 — 2026-09-02 10:40 (BST)</b> · 5x default, TP1 protect / TP2 close 40% / TP3 close 60%, fee tracking on dashboard + report<br/>
+    <b style="color:#93a3c2;">Build: v15 — 2026-09-02 09:09 (BST)</b> · micro-price display fix (PEPE etc.), 3s timeout on funding-rate fetch so it can't stall the engine<br/>
     Assumption recorded: £/$ treated as 1:1 since prices come from USDT pairs — no live FX conversion applied. Fees assumed at 0.1% per side, no funding cost modeled. Each strategy's pot per coin is fully isolated — a loss in one never affects another. Data saved only in this browser.
   </div>
 </div>
@@ -239,7 +239,15 @@ function computeBollinger(c, p = 20, m = 2) {
   return { upper: mean + m * std, lower: mean - m * std };
 }
 function fmt(n, d = 2) { if (n === null || n === undefined || Number.isNaN(n)) return "—"; return n.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d }); }
-function decimalsFor(price) { return price > 100 ? 2 : price > 1 ? 3 : 5; }
+function decimalsFor(price) {
+  // Scale decimal places to the coin's price so micro-cap coins (PEPE, SHIB etc.)
+  // don't round to 0.00000
+  if (price >= 100) return 2;
+  if (price >= 1) return 3;
+  if (price >= 0.01) return 5;
+  if (price >= 0.0001) return 7;
+  return 9;
+}
 
 async function fetchKlines(symbol) {
   // 15m candles give finer resolution for catching stop/target touches between refreshes
@@ -258,12 +266,17 @@ async function fetchKlines(symbol) {
 async function fetchFundingRate(symbol) {
   // Real, free, public futures data — very positive funding means longs are
   // crowded (paying shorts to hold), which is a genuine contrarian signal.
+  // Hard 3-second timeout: a slow futures API must never delay price updates
+  // or the trading engine's stop/target checks.
   try {
-    const res = await fetch(`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${symbol}USDT`);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3000);
+    const res = await fetch(`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${symbol}USDT`, { signal: controller.signal });
+    clearTimeout(timer);
     if (!res.ok) return null;
     const data = await res.json();
     return { fundingRate: parseFloat(data.lastFundingRate) * 100 }; // as %
-  } catch (e) { return null; } // not every coin has a perpetual futures market
+  } catch (e) { return null; } // not every coin has a perpetual futures market, or it timed out
 }
 function sparklineSVG(closes, color) {
   if (!closes.length) return "";
@@ -643,7 +656,8 @@ function generateReport() {
   allTrades.sort((a, b) => a.closedAt - b.closedAt);
   if (!allTrades.length) out += "No trades closed yet.\n";
   allTrades.forEach(t => {
-    out += `[${new Date(t.closedAt).toLocaleString()}] ${t.botLabel} | ${t.coin} ${t.side} | Entry $${fmt(t.entry)} Stop $${fmt(t.stop)} Target $${fmt(t.target)} | Lev ${t.leverage}x | R:R ${fmt(t.riskReward, 1)} | Exit $${fmt(t.exitPrice)} (${t.exitReason}) | Gross $${fmt(t.grossPnl)} Fees $${fmt(t.fees)} Net $${fmt(t.netPnl)} | Balance after $${fmt(t.balanceAfter)} | ${t.result}\n`;
+    const pd = decimalsFor(t.entry);
+    out += `[${new Date(t.closedAt).toLocaleString()}] ${t.botLabel} | ${t.coin} ${t.side} | Entry $${fmt(t.entry, pd)} Stop $${fmt(t.stop, pd)} Target $${fmt(t.target, pd)} | Lev ${t.leverage}x | R:R ${fmt(t.riskReward, 1)} | Exit $${fmt(t.exitPrice, pd)} (${t.exitReason}) | Gross $${fmt(t.grossPnl)} Fees $${fmt(t.fees)} Net $${fmt(t.netPnl)} | Balance after $${fmt(t.balanceAfter)} | ${t.result}\n`;
   });
 
   return out;
