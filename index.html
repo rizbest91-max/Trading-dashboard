@@ -51,6 +51,24 @@
   .compare-table th { color: #566078; font-weight: 600; font-size: 11px; }
   .cell-pos { color: #4ade8f; } .cell-neg { color: #f87189; }
   .best-row td:first-child::after { content: " 🏆"; }
+  .strat-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+  .strat-card { background: #0d1219; border: 1px solid #1e2635; border-radius: 10px; padding: 14px; }
+  .strat-card.leading { border-color: #1f7a56; }
+  .strat-card-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid #1a2130; }
+  .strat-name { font-size: 13px; font-weight: 600; color: #f1f4f8; }
+  .strat-total { font-size: 17px; font-weight: 700; font-family: monospace; }
+  .strat-rows { font-size: 12px; }
+  .strat-row { display: flex; justify-content: space-between; padding: 3px 0; }
+  .strat-row span:first-child { color: #6b7688; }
+  .strat-row span:last-child { font-family: monospace; color: #d6dde8; }
+  .strat-coins { margin-top: 9px; padding-top: 8px; border-top: 1px solid #1a2130; font-size: 10.5px; color: #566078; }
+  .event-log { background: #10151f; border: 1px solid #1e2635; border-radius: 8px; padding: 10px 12px; font-size: 11.5px; color: #93a3c2; margin-bottom: 12px; }
+  .event-log div { padding: 2px 0; }
+  .compact-list { background: #10151f; border: 1px solid #1e2635; border-radius: 10px; padding: 6px 12px; }
+  .compact-row { display: grid; grid-template-columns: 1.4fr 1.2fr 0.8fr 0.8fr 0.9fr 0.9fr; gap: 8px; font-size: 12px; padding: 6px 0; border-bottom: 1px solid #1a2130; align-items: center; }
+  .compact-row:last-child { border-bottom: none; }
+  .compact-head { color: #566078; font-size: 10.5px; font-weight: 600; text-transform: uppercase; }
+  @media (max-width: 700px) { .compact-row { grid-template-columns: 1.2fr 1.2fr 0.7fr 0.9fr; } .compact-row span:nth-child(5) { display: none; } }
 
   .trow { display: grid; grid-template-columns: 80px 60px 55px 85px 85px 90px 65px 80px; gap: 6px; font-size: 10.5px; padding: 6px 4px; border-bottom: 1px solid #1a2130; align-items: center; }
   .trow.head { color: #566078; font-weight: 600; border-bottom: 1px solid #263049; }
@@ -84,7 +102,7 @@
     <div>
       <h1>Trading Monitor</h1>
       <div class="sub">Each strategy trades independently with its own $ per coin · live prices · no real money</div>
-      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v20 · 2026-09-03 (regime filter + ATR stops + Donchian + Funding bots)</div>
+      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v21 · 2026-09-03 (position protection + strategy cards + booked profit)</div>
     </div>
     <button id="refreshBtn">Refresh</button>
   </div>
@@ -146,13 +164,35 @@
           <option value="0">Off</option>
         </select>
       </span>
+      <span><label>Circuit breaker (halt if open losses hit)</label>
+        <select id="engCircuit">
+          <option value="0">Off</option>
+          <option value="5">-5% of capital</option>
+          <option value="8" selected>-8% of capital</option>
+          <option value="12">-12% of capital</option>
+        </select>
+      </span>
+      <span><label>Max positions same direction (per strategy)</label>
+        <select id="engMaxDir">
+          <option value="0">No limit</option>
+          <option value="5">5</option>
+          <option value="8" selected>8</option>
+          <option value="12">12</option>
+        </select>
+      </span>
+      <span><label>Volume confirmation</label>
+        <select id="engVolFilter">
+          <option value="1" selected>On (skip thin-volume moves)</option>
+          <option value="0">Off</option>
+        </select>
+      </span>
     </div>
 
-    <div class="section-title" style="margin-top:16px;">Live comparison — balance per strategy per coin</div>
+    <div class="section-title" style="margin-top:16px;">Strategy performance</div>
     <div class="compare-table" id="compareTable"></div>
 
-    <div class="section-title">Strategy totals (all coins combined)</div>
-    <div class="compare-table" id="totalsTable"></div>
+    <div class="section-title">Engine events</div>
+    <div class="event-log" id="eventLog"></div>
 
     <div class="section-title" style="margin-top:16px;">Currently open positions</div>
     <div class="table-scroll"><div class="table-inner" id="openPosTable"></div></div>
@@ -188,7 +228,7 @@
         <select id="autoTradeThreshold"><option value="70" selected>70+</option><option value="75">75+</option><option value="80">80+</option></select>
       </span>
       <span><label>Max tracked coins</label>
-        <select id="maxTracked"><option value="10">10</option><option value="15" selected>15</option><option value="20">20</option></select>
+        <select id="maxTracked"><option value="20">20</option><option value="30" selected>30</option><option value="40">40</option></select>
       </span>
       <span style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="autoTrackOn" checked /><label for="autoTrackOn" style="margin:0;">Auto-add to test when running</label></span>
     </div>
@@ -200,17 +240,32 @@
     <div id="scannerPlan" style="background:#0a0e17; border:1px solid #1e2635; border-radius:8px;"></div>
   </div>
 
-  <div class="section-title">Live coins</div>
+  <div class="section-title" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+    <span>Live coins</span>
+    <select id="coinViewMode" style="background:#0a0e17; border:1px solid #2a3450; color:#d6dde8; padding:5px 8px; border-radius:6px; font-size:12px; font-weight:400;">
+      <option value="hidden" selected>Hidden</option>
+      <option value="compact">Compact list (no charts)</option>
+      <option value="full">Full cards with charts</option>
+    </select>
+  </div>
   <div class="grid" id="cardGrid"></div>
 
   <div class="footnote">
-    <b style="color:#93a3c2;">Build: v20 — 2026-09-03</b> · BTC regime filter (only trade with the market), ATR-based stops (2N, Turtle-style), new Donchian Breakout and Funding+Momentum bots, signal-reversal exit removed<br/>
+    <b style="color:#93a3c2;">Build: v21 — 2026-09-03</b> · regime-flip exit + circuit breaker (protects OPEN positions when the market turns), per-strategy cards replacing the grid, booked/realized profit, exposure cap, volume confirmation filter, funding threshold fix, tradeability added to scanner score<br/>
     Assumption recorded: £/$ treated as 1:1 since prices come from USDT pairs — no live FX conversion applied. Fees assumed at 0.1% per side, no funding cost modeled. Each strategy's pot per coin is fully isolated — a loss in one never affects another. Data saved only in this browser.
   </div>
 </div>
 
 <script>
-const DEFAULT_COINS = ["BTC", "ETH", "SOL", "BNB", "ADA", "XRP"];
+// All liquid, high-volume, with perpetual futures markets (so the funding bot
+// can actually work on them). More coins = more signals = a usable sample size
+// sooner. The exposure cap keeps total risk in check, so a wider list gives the
+// system more to choose from rather than more to pile into.
+const DEFAULT_COINS = [
+  "BTC", "ETH", "SOL", "BNB", "ADA", "XRP", "DOGE", "AVAX",
+  "LINK", "DOT", "ATOM", "UNI", "AAVE", "NEAR", "ARB", "OP",
+  "SUI", "LTC", "ETC", "FIL", "INJ", "TAO", "ENA", "PEPE",
+];
 const LONG_WINDOW = 96; // 24 hours of 15m candles — wider zones, fewer whipsaw exits
 const REFRESH_MS = 30000;
 const LS_COINS = "tm2_coins", LS_TOGGLES = "tm2_toggles", LS_ENGINE = "tm2_engine";
@@ -365,12 +420,16 @@ function startEngine() {
   const minProfit = parseFloat(document.getElementById("engMinProfit")?.value) || 15;
   const maxHoldHours = parseFloat(document.getElementById("engMaxHold")?.value) || 24;
   const useRegimeFilter = document.getElementById("engRegime")?.value !== "0";
+  const circuitBreakerPct = parseFloat(document.getElementById("engCircuit")?.value) || 0;
+  const maxSameDirection = parseInt(document.getElementById("engMaxDir")?.value) || 0;
+  const useVolumeFilter = document.getElementById("engVolFilter")?.value === "1";
   const bots = {};
   BOTS.forEach(b => {
     bots[b.key] = { coins: {} };
     coinList.forEach(c => { bots[b.key].coins[c] = { cash: perCoinCapital, initial: perCoinCapital, position: null, trades: [] }; });
   });
-  engine = { startedAt: Date.now(), perCoinCapital, leverage, allowShorts, minProfit, maxHoldHours, useRegimeFilter, feePct: 0.001, bots };
+  engine = { startedAt: Date.now(), perCoinCapital, leverage, allowShorts, minProfit, maxHoldHours, useRegimeFilter, circuitBreakerPct, maxSameDirection, useVolumeFilter, halted: false, feePct: 0.001, bots };
+  engineEvents = []; localStorage.setItem("tm2_events", "[]");
   saveEngine();
   renderEngine();
 }
@@ -407,7 +466,74 @@ function runEngineStep() {
     if (btc.price > btc.sma96 && btc.price > btc.sma192) regime = "bull";
     else if (btc.price < btc.sma96 && btc.price < btc.sma192) regime = "bear";
   }
+  const prevRegime = engine.currentRegime;
   engine.currentRegime = regime;
+
+  // ---- PROTECTION FOR OPEN POSITIONS ----
+  // The regime filter only ever blocked NEW entries. If the market flipped while
+  // 35 longs were open, every one would sit there until it individually hit its
+  // stop — roughly $450 of damage at the observed average loss. These two guards
+  // close positions that are on the wrong side of a changed market.
+
+  // 1. Regime flip: market direction reversed, so exit positions fighting it.
+  if (engine.useRegimeFilter !== false && prevRegime && prevRegime !== regime && regime !== "mixed") {
+    let flipClosed = 0;
+    BOTS.forEach(bot => {
+      if (!toggles[bot.key]) return;
+      coinList.forEach(coin => {
+        const acc = engine.bots[bot.key].coins[coin];
+        const s = state[coin];
+        if (!acc || !acc.position || !s || !s.price) return;
+        const wrongSide = (regime === "bear" && acc.position.side === "Long") ||
+                          (regime === "bull" && acc.position.side === "Short");
+        if (wrongSide) {
+          closeFullPosition(acc, acc.position, s.price, `Regime flipped to ${regime}`, Date.now(), engine);
+          flipClosed++;
+        }
+      });
+    });
+    if (flipClosed) logEngineEvent(`Market regime flipped ${prevRegime} → ${regime}. Closed ${flipClosed} positions on the wrong side.`);
+  }
+
+  // 2. Portfolio circuit breaker: if total open losses exceed the limit, close
+  //    everything and stop opening new trades until the user restarts. This is a
+  //    last-resort brake for a fast market-wide move, not normal trade management.
+  if (engine.circuitBreakerPct && !engine.halted) {
+    let totalUnreal = 0, totalCapital = 0;
+    BOTS.forEach(bot => {
+      if (!toggles[bot.key]) return;
+      coinList.forEach(coin => {
+        const acc = engine.bots[bot.key].coins[coin];
+        const s = state[coin];
+        if (!acc) return;
+        totalCapital += acc.initial;
+        if (acc.position && s && s.price) {
+          const p = acc.position;
+          const movePct = p.side === "Long" ? (s.price - p.entry) / p.entry : (p.entry - s.price) / p.entry;
+          totalUnreal += movePct * p.notional;
+        }
+      });
+    });
+    const drawdownPct = totalCapital ? (totalUnreal / totalCapital) * 100 : 0;
+    if (drawdownPct <= -engine.circuitBreakerPct) {
+      let n = 0;
+      BOTS.forEach(bot => {
+        if (!toggles[bot.key]) return;
+        coinList.forEach(coin => {
+          const acc = engine.bots[bot.key].coins[coin];
+          const s = state[coin];
+          if (acc && acc.position && s && s.price) {
+            closeFullPosition(acc, acc.position, s.price, "Circuit breaker", Date.now(), engine);
+            n++;
+          }
+        });
+      });
+      engine.halted = true;
+      engine.haltedAt = Date.now();
+      logEngineEvent(`CIRCUIT BREAKER: open losses hit ${drawdownPct.toFixed(1)}% of capital. Closed ${n} positions and halted trading.`);
+    }
+  }
+  if (engine.halted) { saveEngine(); return; } // no new entries while halted
 
   BOTS.forEach(bot => {
     if (!toggles[bot.key]) return;
@@ -464,6 +590,25 @@ function runEngineStep() {
           if (regime === "bull" && side !== "Long") return;
           if (regime === "bear" && side !== "Short") return;
           if (regime === "mixed") return;
+        }
+
+        // Volume confirmation filter: skip entries where the move isn't backed
+        // by participation. Applied as a filter across all strategies rather
+        // than as its own bot.
+        if (engine.useVolumeFilter && s.volRatio !== null && s.volRatio !== undefined) {
+          if (s.volRatio < 0.8) return; // move happening on unusually thin volume
+        }
+
+        // Correlation / exposure cap: crypto moves together, so 30 longs across
+        // 15 coins is really one big bet, not 30 diversified ones. Limit how many
+        // positions any single strategy can hold in the same direction at once.
+        if (engine.maxSameDirection) {
+          let sameDir = 0;
+          coinList.forEach(c2 => {
+            const a2 = engine.bots[bot.key].coins[c2];
+            if (a2 && a2.position && a2.position.side === side) sameDir++;
+          });
+          if (sameDir >= engine.maxSameDirection) return;
         }
 
         const entry = s.price;
@@ -526,6 +671,13 @@ function runEngineStep() {
   saveEngine();
 }
 function accEquity(acc) { return acc.position ? acc.cash + acc.position.margin : acc.cash; }
+// Running log of notable engine events (regime flips, circuit breaker, halts)
+let engineEvents = JSON.parse(localStorage.getItem("tm2_events") || "[]");
+function logEngineEvent(msg) {
+  engineEvents.unshift({ t: Date.now(), msg });
+  engineEvents = engineEvents.slice(0, 30);
+  localStorage.setItem("tm2_events", JSON.stringify(engineEvents));
+}
 function closeFullPosition(acc, p, exitPrice, exitReason, exitTime, engine) {
   const movePct = p.side === "Long" ? (exitPrice - p.entry) / p.entry : (p.entry - exitPrice) / p.entry;
   const grossPnl = movePct * p.notional;
@@ -554,53 +706,80 @@ function renderEngine() {
   if (!started || !activeBots.length) {
     document.getElementById("bigSummary").innerHTML = "";
     document.getElementById("compareTable").innerHTML = `<div style="color:#566078;font-size:12.5px;">${!started ? "Not running yet." : "Enable at least one strategy above."}</div>`;
-    document.getElementById("totalsTable").innerHTML = "";
     document.getElementById("openPosTable").innerHTML = "";
     document.getElementById("closedTradeTable").innerHTML = "";
     return;
   }
 
-  let compareHtml = `<table><thead><tr><th>Coin</th>${activeBots.map(b => `<th>${b.label}</th>`).join("")}</tr></thead><tbody>`;
-  coinList.forEach(coin => {
-    compareHtml += `<tr><td>${coin}</td>`;
-    activeBots.forEach(b => {
+  // --- Per-strategy cards (replaces the old strategy x coin grid, which was
+  //     mostly empty cells once many coins were inactive) ---
+  const cards = activeBots.map(b => {
+    let equity = 0, initial = 0, realized = 0, unrealized = 0, fees = 0, wins = 0, losses = 0, openCount = 0;
+    const coinsTraded = [];
+    coinList.forEach(coin => {
       const acc = engine.bots[b.key].coins[coin];
-      if (!acc) { compareHtml += `<td>—</td>`; return; }
-      const eq = accEquity(acc);
-      const ret = ((eq - acc.initial) / acc.initial) * 100;
-      compareHtml += `<td class="${ret >= 0 ? "cell-pos" : "cell-neg"}">$${fmt(eq)} (${ret >= 0 ? "+" : ""}${fmt(ret, 1)}%)</td>`;
+      if (!acc) return;
+      equity += accEquity(acc); initial += acc.initial;
+      acc.trades.forEach(t => {
+        realized += t.netPnl || 0; fees += t.fees || 0;
+        if (t.result === "Win") wins++; else losses++;
+      });
+      if (acc.trades.length) coinsTraded.push(coin);
+      if (acc.position) {
+        openCount++;
+        const s = state[coin];
+        if (s && s.price) {
+          const p = acc.position;
+          const movePct = p.side === "Long" ? (s.price - p.entry) / p.entry : (p.entry - s.price) / p.entry;
+          unrealized += movePct * p.notional;
+        }
+      }
     });
-    compareHtml += `</tr>`;
+    const total = realized + unrealized;
+    const trades = wins + losses;
+    const winRate = trades ? (wins / trades * 100) : 0;
+    return { ...b, equity, initial, realized, unrealized, total, fees, wins, losses, trades, winRate, openCount, coinsTraded };
   });
-  compareHtml += `</tbody></table>`;
-  document.getElementById("compareTable").innerHTML = compareHtml;
+  const bestKey = cards.reduce((m, c) => c.total > m.total ? c : m, cards[0]).key;
+
+  document.getElementById("compareTable").innerHTML = `
+    <div class="strat-cards">
+    ${cards.map(c => `
+      <div class="strat-card ${c.key === bestKey && c.total !== 0 ? "leading" : ""}">
+        <div class="strat-card-head">
+          <span class="strat-name">${c.label}${c.key === bestKey && c.total !== 0 ? " 🏆" : ""}</span>
+          <span class="strat-total ${c.total >= 0 ? "cell-pos" : "cell-neg"}">${c.total >= 0 ? "+" : ""}$${fmt(c.total)}</span>
+        </div>
+        <div class="strat-rows">
+          <div class="strat-row"><span>Booked profit</span><span class="${c.realized >= 0 ? "cell-pos" : "cell-neg"}" style="font-weight:700;">${c.realized >= 0 ? "+" : ""}$${fmt(c.realized)}</span></div>
+          <div class="strat-row"><span>Unrealized (open)</span><span class="${c.unrealized >= 0 ? "cell-pos" : "cell-neg"}">${c.unrealized >= 0 ? "+" : ""}$${fmt(c.unrealized)}</span></div>
+          <div class="strat-row"><span>Balance</span><span>$${fmt(c.equity)} <span style="color:#566078;font-size:10.5px;">of $${fmt(c.initial, 0)}</span></span></div>
+          <div class="strat-row"><span>Trades</span><span>${c.trades ? `${c.wins}W / ${c.losses}L · ${fmt(c.winRate, 0)}%` : "none yet"}</span></div>
+          <div class="strat-row"><span>Open now</span><span>${c.openCount}</span></div>
+          <div class="strat-row"><span>Fees paid</span><span style="color:#e0ac4c;">-$${fmt(c.fees)}</span></div>
+        </div>
+        ${c.coinsTraded.length ? `<div class="strat-coins">Traded: ${c.coinsTraded.join(", ")}</div>` : ""}
+      </div>`).join("")}
+    </div>`;
 
   // --- Big, hard-to-miss summary: unrealized P/L + available cash across everything ---
-  let totalAvailableCash = 0, totalLockedMargin = 0, totalFeesPaid = 0, totalGrossPnl = 0;
+  let totalAvailableCash = 0, totalLockedMargin = 0, totalFeesPaid = 0, totalGrossPnl = 0, totalRealized = 0;
   activeBots.forEach(b => coinList.forEach(coin => {
     const acc = engine.bots[b.key].coins[coin];
     if (acc) {
       totalAvailableCash += acc.cash;
       if (acc.position) totalLockedMargin += acc.position.margin;
-      acc.trades.forEach(t => { totalFeesPaid += t.fees || 0; totalGrossPnl += t.grossPnl || 0; });
+      acc.trades.forEach(t => { totalFeesPaid += t.fees || 0; totalGrossPnl += t.grossPnl || 0; totalRealized += t.netPnl || 0; });
     }
   }));
 
-  const botTotals = activeBots.map(b => {
-    let totalEquity = 0, totalInitial = 0, fees = 0;
-    coinList.forEach(coin => {
-      const acc = engine.bots[b.key].coins[coin];
-      if (acc) { totalEquity += accEquity(acc); totalInitial += acc.initial; acc.trades.forEach(t => fees += t.fees || 0); }
-    });
-    return { key: b.key, label: b.label, totalEquity, totalInitial, fees, ret: totalInitial ? ((totalEquity - totalInitial) / totalInitial) * 100 : 0 };
-  });
-  const bestBot = botTotals.reduce((m, b) => b.ret > m.ret ? b : m, botTotals[0]);
-  let totalsHtml = `<table><thead><tr><th>Strategy</th><th>Total value</th><th>Return</th><th>Fees paid</th></tr></thead><tbody>`;
-  botTotals.forEach(b => {
-    totalsHtml += `<tr class="${b.key === bestBot.key ? "best-row" : ""}"><td>${b.label}</td><td>$${fmt(b.totalEquity)}</td><td class="${b.ret >= 0 ? "cell-pos" : "cell-neg"}">${b.ret >= 0 ? "+" : ""}${fmt(b.ret, 1)}%</td><td style="color:#e0ac4c;">-$${fmt(b.fees)}</td></tr>`;
-  });
-  totalsHtml += `</tbody></table>`;
-  document.getElementById("totalsTable").innerHTML = totalsHtml;
+  // Engine event log (regime flips, circuit breaker)
+  const evEl = document.getElementById("eventLog");
+  if (evEl) {
+    evEl.innerHTML = engineEvents.length
+      ? engineEvents.slice(0, 6).map(e => `<div>${new Date(e.t).toLocaleString()} — ${e.msg}</div>`).join("")
+      : `<div style="color:#566078;">No regime flips or circuit-breaker events yet.</div>`;
+  }
 
   // --- Currently open positions ---
   let openRows = [];
@@ -632,8 +811,13 @@ function renderEngine() {
   ` : `<div style="color:#566078;font-size:12.5px;padding:6px 0;">Nothing open right now.</div>`;
 
   document.getElementById("bigSummary").innerHTML = `
+    ${engine.halted ? `<div class="banner" style="background:#3a1420;border-color:#6b1f39;color:#f8a8b6;"><b>TRADING HALTED</b> — the circuit breaker fired at ${new Date(engine.haltedAt).toLocaleString()}. All positions were closed and no new trades will open. Press "Restart test" to resume.</div>` : ""}
     <div class="big-summary">
       <div class="big-box highlight">
+        <div class="big-label">Booked profit (closed)</div>
+        <div class="big-val ${totalRealized > 0 ? "pos" : totalRealized < 0 ? "neg" : ""}">${totalRealized >= 0 ? "+" : ""}$${fmt(totalRealized)}</div>
+      </div>
+      <div class="big-box">
         <div class="big-label">Unrealized P/L (open trades)</div>
         <div class="big-val ${totalUnrealized > 0 ? "pos" : totalUnrealized < 0 ? "neg" : ""}">${openRows.length ? (totalUnrealized >= 0 ? "+" : "") + "$" + fmt(totalUnrealized) : "$0.00"}</div>
       </div>
@@ -792,7 +976,7 @@ async function refresh() {
 
 // Shared analysis used for BOTH your tracked coins and the wider market scan.
 async function analyzeCoin(ticker) {
-  const { closes, highs, lows, times } = await fetchKlines(ticker);
+  const { closes, highs, lows, volumes, times } = await fetchKlines(ticker);
   // Reject newly listed / thin coins: we ask for 200 candles, so anything
   // returning far fewer hasn't traded long enough for reliable indicators.
   if (closes.length < 150) throw new Error(ticker + ": insufficient price history");
@@ -822,6 +1006,16 @@ async function analyzeCoin(ticker) {
   const atr = computeATR(highs, lows, closes, 14);
   const atrPct = atr && price ? atr / price : null;
 
+  // Volume confirmation: is the current move backed by real participation?
+  // Used as a FILTER on other strategies rather than a standalone bot — a price
+  // move on thin volume is far more likely to be noise that reverses.
+  let volRatio = null;
+  if (volumes && volumes.length >= 21) {
+    const recentVols = volumes.slice(-21, -1);
+    const avgVol = recentVols.reduce((a, b) => a + b, 0) / recentVols.length;
+    if (avgVol > 0) volRatio = volumes[volumes.length - 1] / avgVol;
+  }
+
   // Average daily range over the last few days (96 x 15m candles = 1 day),
   // used to judge whether a target is a move this coin realistically makes.
   let avgDailyRangePct = null;
@@ -843,7 +1037,7 @@ async function analyzeCoin(ticker) {
     closes, highs, lows, times, price,
     buyZoneLow: support, buyZoneHigh: support + range * 0.25,
     sellZoneLow: resistance - range * 0.25, sellZoneHigh: resistance,
-    sma96, sma192, positionInRange, avgDailyRangePct, atr, atrPct, fundingRate: funding ? funding.fundingRate : null,
+    sma96, sma192, positionInRange, avgDailyRangePct, atr, atrPct, volRatio, fundingRate: funding ? funding.fundingRate : null,
     indicators: {
       sma: { signal: smaSignal, reading: smaSignal === "bull" ? "Short > Long" : smaSignal === "bear" ? "Short < Long" : "—" },
       rsi: { signal: rsiSignal, reading: rsiVal !== null ? rsiVal.toFixed(1) : "—", value: rsiVal },
@@ -856,10 +1050,13 @@ async function analyzeCoin(ticker) {
       funding: (() => {
         const f = funding ? funding.fundingRate : null;
         if (f === null || macdRes.hist === null) return { signal: "neutral", reading: "no futures data" };
-        const CROWDED = 0.01; // % per interval
+        // Threshold lowered from 0.01 to 0.005. At 0.01 it sat exactly on the
+        // typical resting funding rate (~0.010%), so the bot never fired once
+        // across two full days of testing.
+        const CROWDED = 0.005;
         let sig = "neutral";
-        if (f > CROWDED && macdRes.hist < 0) sig = "bear";   // crowded longs, momentum turning down
-        else if (f < -CROWDED && macdRes.hist > 0) sig = "bull"; // crowded shorts, momentum turning up
+        if (f > CROWDED && macdRes.hist < 0) sig = "bear";
+        else if (f < -CROWDED && macdRes.hist > 0) sig = "bull";
         return { signal: sig, reading: f.toFixed(3) + "%" };
       })(),
     },
@@ -1018,12 +1215,28 @@ function scoreDirection(s, dir) {
   }
   score += Math.min(momPts, 30);
 
-  // Structure (20%) — room to run: longs want to be nearer support, shorts nearer resistance
+  // Structure (15%) — room to run: longs want to be nearer support, shorts nearer resistance
   let structPts = 0;
   if (s.positionInRange !== undefined) {
-    structPts = bullish ? (1 - s.positionInRange) * 20 : s.positionInRange * 20;
+    structPts = bullish ? (1 - s.positionInRange) * 15 : s.positionInRange * 15;
   }
   score += structPts;
+
+  // Tradeability (15%) — is there actually enough money in this setup?
+  // Added because the score previously rated pegged/tight-range coins highly
+  // (USD1 scored 80/100 with a 0.0% stop distance). A beautiful chart with no
+  // room to move is not a trade.
+  let tradePts = 0;
+  if (s.atrPct) {
+    // TP3 sits at 2.5x a 2xATR stop, so expected move = 5 x ATR
+    const expectedMovePct = s.atrPct * 5 * 100;
+    if (expectedMovePct >= 6) tradePts = 15;
+    else if (expectedMovePct >= 4) tradePts = 12;
+    else if (expectedMovePct >= 2.5) tradePts = 8;
+    else if (expectedMovePct >= 1.5) tradePts = 4;
+    else tradePts = 0; // too tight to be worth trading
+  }
+  score += tradePts;
 
   // Funding rate (10%) — contrarian signal on crowding, where available
   let fundPts = 5; // neutral default if no futures data
@@ -1132,6 +1345,41 @@ function renderScanner() {
 function renderCards() {
   const grid = document.getElementById("cardGrid");
   const activeBots = BOTS.filter(b => toggles[b.key]);
+  const mode = document.getElementById("coinViewMode")?.value || "hidden";
+
+  // With 24+ coins tracked, full cards with charts become a wall of scrolling.
+  // Default to hidden; compact gives a scannable one-line-per-coin summary.
+  if (mode === "hidden") {
+    grid.style.display = "block";
+    grid.innerHTML = `<div style="color:#566078;font-size:12.5px;padding:4px 0;">${coinList.length} coins tracked — set the dropdown above to show them.</div>`;
+    return;
+  }
+
+  if (mode === "compact") {
+    grid.style.display = "block";
+    const rows = coinList.map(ticker => {
+      const s = state[ticker] || {}; const ind = s.indicators || {};
+      const d = s.price ? decimalsFor(s.price) : 2;
+      let bull = 0, bear = 0;
+      activeBots.forEach(b => { const sg = ind[b.key] && ind[b.key].signal; if (sg === "bull") bull++; if (sg === "bear") bear++; });
+      const lean = bull > bear ? "bull" : bear > bull ? "bear" : "flat";
+      const inTrade = engine && BOTS.some(b => toggles[b.key] && engine.bots[b.key] && engine.bots[b.key].coins[ticker] && engine.bots[b.key].coins[ticker].position);
+      return `<div class="compact-row">
+        <span style="font-weight:600;">${ticker}${inTrade ? ` <span style="color:#4ade8f;font-size:9px;">IN TRADE</span>` : ""}</span>
+        <span style="font-family:monospace;">${s.price ? "$" + fmt(s.price, d) : "—"}</span>
+        <span style="color:#566078;">RSI ${ind.rsi && ind.rsi.value !== null && ind.rsi.value !== undefined ? ind.rsi.value.toFixed(0) : "—"}</span>
+        <span style="color:#566078;">ATR ${s.atrPct ? (s.atrPct * 100).toFixed(1) + "%" : "—"}</span>
+        <span style="color:#566078;">Vol ${s.volRatio ? s.volRatio.toFixed(1) + "x" : "—"}</span>
+        <span class="ind-tag ${lean}" style="justify-self:end;">${bull > bear ? bull + " bull" : bear > bull ? bear + " bear" : "mixed"}</span>
+      </div>`;
+    }).join("");
+    grid.innerHTML = `<div class="compact-list">
+      <div class="compact-row compact-head"><span>Coin</span><span>Price</span><span>RSI</span><span>ATR</span><span>Volume</span><span style="justify-self:end;">Signals</span></div>
+      ${rows}</div>`;
+    return;
+  }
+
+  grid.style.display = "grid";
   grid.innerHTML = coinList.map(ticker => {
     const s = state[ticker] || {}; const ind = s.indicators || {};
     const d = s.price ? decimalsFor(s.price) : 2;
@@ -1153,6 +1401,7 @@ function renderCards() {
 }
 
 document.getElementById("refreshBtn").addEventListener("click", refresh);
+document.getElementById("coinViewMode").addEventListener("change", renderCards);
 document.getElementById("addCoinBtn").addEventListener("click", () => { const i = document.getElementById("newCoinInput"); addCoin(i.value); i.value = ""; });
 document.getElementById("engineStartBtn").addEventListener("click", startEngine);
 document.getElementById("engineResetBtn").addEventListener("click", resetEngine);
