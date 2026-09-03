@@ -84,7 +84,7 @@
     <div>
       <h1>Trading Monitor</h1>
       <div class="sub">Each strategy trades independently with its own $ per coin · live prices · no real money</div>
-      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v18 · 2026-09-02 12:08 BST</div>
+      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v20 · 2026-09-03 (regime filter + ATR stops + Donchian + Funding bots)</div>
     </div>
     <button id="refreshBtn">Refresh</button>
   </div>
@@ -138,6 +138,12 @@
           <option value="24" selected>24 hours</option>
           <option value="48">48 hours</option>
           <option value="9999">No limit</option>
+        </select>
+      </span>
+      <span><label>BTC regime filter</label>
+        <select id="engRegime">
+          <option value="1" selected>On (trade with the market)</option>
+          <option value="0">Off</option>
         </select>
       </span>
     </div>
@@ -198,7 +204,7 @@
   <div class="grid" id="cardGrid"></div>
 
   <div class="footnote">
-    <b style="color:#93a3c2;">Build: v18 — 2026-09-02 12:08 (BST)</b> · entry score recorded + shown, reachability check (skips targets beyond the coin's normal daily range), 24h max trade duration, age column<br/>
+    <b style="color:#93a3c2;">Build: v20 — 2026-09-03</b> · BTC regime filter (only trade with the market), ATR-based stops (2N, Turtle-style), new Donchian Breakout and Funding+Momentum bots, signal-reversal exit removed<br/>
     Assumption recorded: £/$ treated as 1:1 since prices come from USDT pairs — no live FX conversion applied. Fees assumed at 0.1% per side, no funding cost modeled. Each strategy's pot per coin is fully isolated — a loss in one never affects another. Data saved only in this browser.
   </div>
 </div>
@@ -214,10 +220,12 @@ const BOTS = [
   { key: "rsi", label: "RSI" },
   { key: "macd", label: "MACD" },
   { key: "boll", label: "Bollinger Bands" },
+  { key: "donchian", label: "Donchian Breakout" },
+  { key: "funding", label: "Funding + Momentum" },
 ];
 
 let coinList = JSON.parse(localStorage.getItem(LS_COINS) || "null") || DEFAULT_COINS.slice();
-let toggles = JSON.parse(localStorage.getItem(LS_TOGGLES) || "null") || { sma: true, rsi: true, macd: false, boll: false };
+let toggles = JSON.parse(localStorage.getItem(LS_TOGGLES) || "null") || { sma: true, rsi: true, macd: true, boll: true, donchian: true, funding: true };
 let engine = JSON.parse(localStorage.getItem(LS_ENGINE) || "null");
 const state = {};
 
@@ -253,6 +261,32 @@ function computeBollinger(c, p = 20, m = 2) {
   const s = c.slice(-p); const mean = s.reduce((a, b) => a + b, 0) / p;
   const variance = s.reduce((a, b) => a + (b - mean) ** 2, 0) / p; const std = Math.sqrt(variance);
   return { upper: mean + m * std, lower: mean - m * std };
+}
+// Donchian channel — the Turtle Traders' entry signal. Uses raw price structure
+// (highest high / lowest low over N periods) rather than an averaged indicator,
+// so it has no smoothing lag. Excludes the current candle so a breakout means
+// price exceeded the PRIOR range, not its own high.
+function computeDonchian(highs, lows, period) {
+  if (highs.length < period + 1) return null;
+  const h = highs.slice(-period - 1, -1);
+  const l = lows.slice(-period - 1, -1);
+  return { upper: Math.max(...h), lower: Math.min(...l) };
+}
+// Average True Range — volatility measure. The Turtles sized positions and set
+// stops from ATR ("N") so risk stayed consistent across markets of very
+// different volatility, instead of using one fixed percentage everywhere.
+function computeATR(highs, lows, closes, period = 14) {
+  if (closes.length < period + 1) return null;
+  const trs = [];
+  for (let i = closes.length - period; i < closes.length; i++) {
+    const tr = Math.max(
+      highs[i] - lows[i],
+      Math.abs(highs[i] - closes[i - 1]),
+      Math.abs(lows[i] - closes[i - 1])
+    );
+    trs.push(tr);
+  }
+  return trs.reduce((a, b) => a + b, 0) / trs.length;
 }
 function fmt(n, d = 2) { if (n === null || n === undefined || Number.isNaN(n)) return "—"; return n.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d }); }
 function decimalsFor(price) {
@@ -330,12 +364,13 @@ function startEngine() {
   const allowShorts = document.getElementById("engShorts").value === "1";
   const minProfit = parseFloat(document.getElementById("engMinProfit")?.value) || 15;
   const maxHoldHours = parseFloat(document.getElementById("engMaxHold")?.value) || 24;
+  const useRegimeFilter = document.getElementById("engRegime")?.value !== "0";
   const bots = {};
   BOTS.forEach(b => {
     bots[b.key] = { coins: {} };
     coinList.forEach(c => { bots[b.key].coins[c] = { cash: perCoinCapital, initial: perCoinCapital, position: null, trades: [] }; });
   });
-  engine = { startedAt: Date.now(), perCoinCapital, leverage, allowShorts, minProfit, maxHoldHours, feePct: 0.001, bots };
+  engine = { startedAt: Date.now(), perCoinCapital, leverage, allowShorts, minProfit, maxHoldHours, useRegimeFilter, feePct: 0.001, bots };
   saveEngine();
   renderEngine();
 }
@@ -359,6 +394,20 @@ function botSignal(botKey, ind) {
 function runEngineStep() {
   if (!engine) return;
   coinList.forEach(coin => ensureCoinInEngine(coin));
+
+  // ---- BTC REGIME FILTER ----
+  // Research finding with the best evidence-to-effort ratio: only take trades
+  // aligned with the broader market direction. Yesterday every bot shorted into
+  // a market that then turned bullish — a regime filter blocks exactly that.
+  // Bullish regime = BTC above both its ~24h and ~48h averages; bearish = below both;
+  // mixed = no clear regime.
+  let regime = "mixed";
+  const btc = state["BTC"] || wideState["BTC"];
+  if (btc && btc.price && btc.sma96 && btc.sma192) {
+    if (btc.price > btc.sma96 && btc.price > btc.sma192) regime = "bull";
+    else if (btc.price < btc.sma96 && btc.price < btc.sma192) regime = "bear";
+  }
+  engine.currentRegime = regime;
 
   BOTS.forEach(bot => {
     if (!toggles[bot.key]) return;
@@ -397,17 +446,10 @@ function runEngineStep() {
           }
         }
 
-        if (acc.position) {
-          const sig = botSignal(bot.key, s.indicators);
-          const reversed = (p.side === "Long" && sig === "bear") || (p.side === "Short" && sig === "bull");
-          if (reversed) {
-            p.reverseCount = (p.reverseCount || 0) + 1;
-          } else {
-            p.reverseCount = 0;
-          }
-          // Require the reversal to hold for 2 consecutive checks (not just one noisy flip)
-          if (p.reverseCount >= 2) closeFullPosition(acc, p, s.price, "Signal reversed (confirmed)", Date.now(), engine);
-        }
+        // NOTE: the old "signal reversed" exit was removed here. It closed 40 trades
+        // in the 02-03 Sep run for a net -$88.65 at a 15% win rate — bailing out on
+        // indicator noise and paying a fee pair each time. Exits are now stop-loss,
+        // TP3, or the max-duration timeout only.
       } else {
         const sig = botSignal(bot.key, s.indicators);
         let side = null;
@@ -415,8 +457,26 @@ function runEngineStep() {
         else if (sig === "bear" && engine.allowShorts) side = "Short";
         if (!side) return;
 
+        // Regime gate: don't fight the broader market. In a bullish BTC regime
+        // take longs only; in a bearish regime take shorts only; in a mixed
+        // regime take nothing (this is when choppy conditions eat trend systems).
+        if (engine.useRegimeFilter !== false) {
+          if (regime === "bull" && side !== "Long") return;
+          if (regime === "bear" && side !== "Short") return;
+          if (regime === "mixed") return;
+        }
+
         const entry = s.price;
-        const stop = side === "Long" ? s.buyZoneLow : s.sellZoneHigh;
+        // ATR-based stop (Turtle "2N"): stop distance scales with each coin's own
+        // volatility instead of a fixed percentage. A calm coin gets a tight stop,
+        // a wild coin gets room to breathe — risk stays consistent across both.
+        let stop;
+        if (s.atrPct && s.atrPct > 0) {
+          const stopDist = s.atrPct * 2; // 2 x ATR
+          stop = side === "Long" ? entry * (1 - stopDist) : entry * (1 + stopDist);
+        } else {
+          stop = side === "Long" ? s.buyZoneLow : s.sellZoneHigh; // fallback
+        }
         if (!stop || stop === entry) return;
         const stopDistPct = Math.abs(entry - stop) / entry;
         if (stopDistPct < 0.012) return; // require at least ~1.2% room to the stop
@@ -594,6 +654,11 @@ function renderEngine() {
         <div class="big-val" style="color:#e0ac4c;">-$${fmt(totalFeesPaid)}</div>
         <div style="font-size:10.5px; color:#566078; margin-top:4px;">Gross before fees: ${totalGrossPnl >= 0 ? "+" : ""}$${fmt(totalGrossPnl)}</div>
       </div>
+      <div class="big-box" style="border-color:${engine.currentRegime === "bull" ? "#1f7a56" : engine.currentRegime === "bear" ? "#6b1f39" : "#2a3450"};">
+        <div class="big-label">BTC market regime</div>
+        <div class="big-val" style="color:${engine.currentRegime === "bull" ? "#4ade8f" : engine.currentRegime === "bear" ? "#f87189" : "#7c879c"}; font-size:20px;">${engine.currentRegime === "bull" ? "BULLISH" : engine.currentRegime === "bear" ? "BEARISH" : "MIXED"}</div>
+        <div style="font-size:10.5px; color:#566078; margin-top:4px;">${engine.useRegimeFilter === false ? "Filter off" : engine.currentRegime === "mixed" ? "No new trades" : "Only " + (engine.currentRegime === "bull" ? "longs" : "shorts")}</div>
+      </div>
     </div>`;
 
   let allTrades = [];
@@ -711,6 +776,12 @@ async function refresh() {
     } catch (e) { lastError = e.message; if (state[ticker]) state[ticker].error = lastError; }
   }));
 
+  // BTC is always analysed — the regime filter needs it even if the user
+  // isn't tracking BTC as a tradeable coin.
+  if (!coinList.includes("BTC") && !wideState["BTC"]) {
+    try { wideState["BTC"] = await analyzeCoin("BTC"); } catch (e) { /* ignore */ }
+  }
+
   if (engine) runEngineStep();
 
   document.getElementById("banner").innerHTML = anySuccess ? "" : `<div class="banner">Live price fetch failed (${lastError}). Check your internet connection.</div>`;
@@ -742,6 +813,15 @@ async function analyzeCoin(ticker) {
   const sma192 = sma192Arr[sma192Arr.length - 1];
   const positionInRange = range ? (price - support) / range : 0.5;
 
+  // Donchian breakout (Turtle System 1: 20 periods). Long when price breaks
+  // above the prior range high, short when it breaks below the prior low.
+  const donch = computeDonchian(highs, lows, 20);
+  const donchSignal = !donch ? "neutral" : price > donch.upper ? "bull" : price < donch.lower ? "bear" : "neutral";
+
+  // ATR for volatility-based stops and sizing
+  const atr = computeATR(highs, lows, closes, 14);
+  const atrPct = atr && price ? atr / price : null;
+
   // Average daily range over the last few days (96 x 15m candles = 1 day),
   // used to judge whether a target is a move this coin realistically makes.
   let avgDailyRangePct = null;
@@ -763,12 +843,25 @@ async function analyzeCoin(ticker) {
     closes, highs, lows, times, price,
     buyZoneLow: support, buyZoneHigh: support + range * 0.25,
     sellZoneLow: resistance - range * 0.25, sellZoneHigh: resistance,
-    sma96, sma192, positionInRange, avgDailyRangePct, fundingRate: funding ? funding.fundingRate : null,
+    sma96, sma192, positionInRange, avgDailyRangePct, atr, atrPct, fundingRate: funding ? funding.fundingRate : null,
     indicators: {
       sma: { signal: smaSignal, reading: smaSignal === "bull" ? "Short > Long" : smaSignal === "bear" ? "Short < Long" : "—" },
       rsi: { signal: rsiSignal, reading: rsiVal !== null ? rsiVal.toFixed(1) : "—", value: rsiVal },
       macd: { signal: macdSignal, reading: macdRes.hist !== null ? macdRes.hist.toFixed(2) : "—", hist: macdRes.hist },
       boll: { signal: bollSignal, reading: boll ? "$" + fmt(price, decimalsFor(price)) : "—" },
+      donchian: { signal: donchSignal, reading: donch ? (donchSignal === "bull" ? "Broke 20-high" : donchSignal === "bear" ? "Broke 20-low" : "Inside range") : "—" },
+      // Funding + Momentum: funding rate is the only signal here NOT derived from
+      // price — it's real positioning data. Crowded longs (very positive funding)
+      // with fading momentum is a contrarian short; the reverse is a long.
+      funding: (() => {
+        const f = funding ? funding.fundingRate : null;
+        if (f === null || macdRes.hist === null) return { signal: "neutral", reading: "no futures data" };
+        const CROWDED = 0.01; // % per interval
+        let sig = "neutral";
+        if (f > CROWDED && macdRes.hist < 0) sig = "bear";   // crowded longs, momentum turning down
+        else if (f < -CROWDED && macdRes.hist > 0) sig = "bull"; // crowded shorts, momentum turning up
+        return { signal: sig, reading: f.toFixed(3) + "%" };
+      })(),
     },
     error: null,
   };
