@@ -25,7 +25,7 @@
   button.primary:hover { background: linear-gradient(160deg, #22855e, #17573f); box-shadow: 0 0 22px rgba(31,122,86,0.4); }
   button.danger { background: #3a1420; border-color: #6b1f39; color: #f8a8b6; }
   .status { font-size: 11.5px; color: #566078; margin: 8px 0 12px; }
-  .banner { background: #2a1f0d; border: 1px solid #6b4e17; color: #e0ac4c; padding: 10px 14px; border-radius: 6px; font-size: 13px; margin-bottom: 14px; }
+  .banner { background: linear-gradient(160deg, rgba(58,44,15,0.7), rgba(30,23,10,0.8)); backdrop-filter: blur(6px); border: 1px solid rgba(107,78,23,0.7); color: #e0ac4c; padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 14px; }
   .big-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
   .big-box { background: linear-gradient(155deg, rgba(21,27,40,0.85), rgba(13,18,28,0.9)); backdrop-filter: blur(8px); border: 1px solid rgba(38,48,73,0.8); border-radius: 14px; padding: 16px; text-align: center; position: relative; overflow: hidden; transition: transform 0.25s ease, box-shadow 0.25s ease; }
   .big-box::before { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(74,222,143,0.4), transparent); height: 1px; top: 0; opacity: 0.6; }
@@ -34,27 +34,30 @@
   .big-label { font-size: 11.5px; color: #7c879c; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.03em; }
   .big-val { font-size: 26px; font-weight: 700; font-family: monospace; color: #f1f4f8; }
   .big-val.pos { color: #4ade8f; } .big-val.neg { color: #f87189; }
-  .section-title { font-size: 13.5px; font-weight: 600; color: #b3bccb; margin: 20px 0 9px; }
+  .section-title { font-size: 13.5px; font-weight: 600; color: #b3bccb; margin: 20px 0 9px; padding-left: 10px; border-left: 2px solid rgba(74,222,143,0.5); }
   .toggles { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
-  .toggle-chip { display: flex; align-items: center; gap: 7px; background: #141b29; border: 1px solid #263049; padding: 8px 12px; border-radius: 8px; font-size: 12.5px; cursor: pointer; user-select: none; }
+  .toggle-chip { display: flex; align-items: center; gap: 7px; background: linear-gradient(160deg, #182034, #10151f); border: 1px solid rgba(38,48,73,0.9); padding: 8px 12px; border-radius: 8px; font-size: 12.5px; cursor: pointer; user-select: none; transition: all 0.2s ease; }
+  .toggle-chip:hover { border-color: rgba(74,222,143,0.3); }
   .toggle-chip.on { border-color: rgba(31,122,86,0.8); background: linear-gradient(160deg, #14352a, #0e2a1e); color: #baf5da; box-shadow: 0 0 14px rgba(31,122,86,0.25); }
   .switch-dot { width: 9px; height: 9px; border-radius: 50%; background: #3d4759; }
   .toggle-chip.on .switch-dot { background: #4ade8f; }
   .coin-manager { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 4px; }
-  .chip { background: #141b29; border: 1px solid #263049; padding: 5px 10px; border-radius: 20px; font-size: 12px; display: flex; align-items: center; gap: 6px; color: #a9b4c4; }
+  .chip { background: linear-gradient(160deg, #182034, #10151f); border: 1px solid rgba(38,48,73,0.9); padding: 5px 10px; border-radius: 20px; font-size: 12px; display: flex; align-items: center; gap: 6px; color: #a9b4c4; transition: border-color 0.2s ease; }
+  .chip:hover { border-color: rgba(74,222,143,0.35); }
   .chip button { padding: 0 4px; border: none; background: none; color: #6b7688; font-size: 13px; cursor: pointer; }
   .add-coin { display: flex; gap: 6px; margin-top: 8px; }
-  .add-coin input { background: #0a0e17; border: 1px solid #2a3450; color: #d6dde8; padding: 6px 9px; border-radius: 6px; font-size: 13px; width: 90px; text-transform: uppercase; }
+  .add-coin input { background: rgba(6,9,17,0.8); border: 1px solid rgba(42,52,80,0.9); color: #d6dde8; padding: 6px 9px; border-radius: 6px; font-size: 13px; width: 90px; text-transform: uppercase; transition: border-color 0.2s ease, box-shadow 0.2s ease; }
+  .add-coin input:focus, select:focus { outline: none; border-color: rgba(74,222,143,0.5); box-shadow: 0 0 0 3px rgba(74,222,143,0.08); }
 
-  .engine-panel { background: #10151f; border: 1px solid #1e2635; border-radius: 10px; padding: 16px; margin-bottom: 18px; }
+  .engine-panel { background: linear-gradient(155deg, rgba(16,21,31,0.9), rgba(9,12,19,0.95)); backdrop-filter: blur(8px); border: 1px solid rgba(30,38,53,0.9); border-radius: 14px; padding: 18px; margin-bottom: 18px; box-shadow: 0 12px 32px rgba(0,0,0,0.25); }
   .engine-top { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
   .engine-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
   .engine-controls label { font-size: 11.5px; color: #6b7688; margin-right: 4px; }
-  .engine-controls select, .engine-controls input { background: #0a0e17; border: 1px solid #2a3450; color: #d6dde8; padding: 6px 8px; border-radius: 6px; font-size: 12.5px; font-family: monospace; }
+  .engine-controls select, .engine-controls input { background: rgba(6,9,17,0.8); border: 1px solid rgba(42,52,80,0.9); color: #d6dde8; padding: 6px 8px; border-radius: 6px; font-size: 12.5px; font-family: monospace; transition: border-color 0.2s ease; }
 
   .compare-table { overflow-x: auto; margin-top: 14px; }
   .compare-table table { border-collapse: collapse; width: 100%; font-size: 12px; min-width: 480px; }
-  .compare-table th, .compare-table td { padding: 8px 10px; text-align: right; border-bottom: 1px solid #1a2130; }
+  .compare-table th, .compare-table td { padding: 8px 10px; text-align: right; border-bottom: 1px solid rgba(26,33,48,0.9); }
   .compare-table th:first-child, .compare-table td:first-child { text-align: left; color: #93a3c2; font-weight: 600; }
   .compare-table th { color: #566078; font-weight: 600; font-size: 11px; }
   .cell-pos { color: #4ade8f; } .cell-neg { color: #f87189; }
@@ -70,24 +73,27 @@
   .strat-row { display: flex; justify-content: space-between; padding: 3px 0; }
   .strat-row span:first-child { color: #6b7688; }
   .strat-row span:last-child { font-family: monospace; color: #d6dde8; }
-  .strat-coins { margin-top: 9px; padding-top: 8px; border-top: 1px solid #1a2130; font-size: 10.5px; color: #566078; }
-  .event-log { background: #10151f; border: 1px solid #1e2635; border-radius: 8px; padding: 10px 12px; font-size: 11.5px; color: #93a3c2; margin-bottom: 12px; }
+  .strat-coins { margin-top: 9px; padding-top: 8px; border-top: 1px solid rgba(26,33,48,0.9); font-size: 10.5px; color: #566078; }
+  .event-log { background: linear-gradient(155deg, rgba(16,21,31,0.85), rgba(9,12,19,0.9)); backdrop-filter: blur(6px); border: 1px solid rgba(30,38,53,0.9); border-radius: 10px; padding: 10px 12px; font-size: 11.5px; color: #93a3c2; margin-bottom: 12px; }
   .event-log div { padding: 2px 0; }
-  .compact-list { background: #10151f; border: 1px solid #1e2635; border-radius: 10px; padding: 6px 12px; }
-  .compact-row { display: grid; grid-template-columns: 1.4fr 1.2fr 0.8fr 0.8fr 0.9fr 0.9fr; gap: 8px; font-size: 12px; padding: 6px 0; border-bottom: 1px solid #1a2130; align-items: center; }
+  .compact-list { background: linear-gradient(155deg, rgba(16,21,31,0.85), rgba(9,12,19,0.9)); backdrop-filter: blur(6px); border: 1px solid rgba(30,38,53,0.9); border-radius: 10px; padding: 6px 12px; }
+  .compact-row { display: grid; grid-template-columns: 1.4fr 1.2fr 0.8fr 0.8fr 0.9fr 0.9fr; gap: 8px; font-size: 12px; padding: 6px 0; border-bottom: 1px solid rgba(26,33,48,0.9); align-items: center; transition: background 0.15s ease; }
+  .compact-row:not(.compact-head):hover { background: rgba(74,222,143,0.03); }
   .compact-row:last-child { border-bottom: none; }
   .compact-head { color: #566078; font-size: 10.5px; font-weight: 600; text-transform: uppercase; }
   @media (max-width: 700px) { .compact-row { grid-template-columns: 1.2fr 1.2fr 0.7fr 0.9fr; } .compact-row span:nth-child(5) { display: none; } }
 
-  .trow { display: grid; grid-template-columns: 80px 60px 55px 85px 85px 90px 65px 80px; gap: 6px; font-size: 10.5px; padding: 6px 4px; border-bottom: 1px solid #1a2130; align-items: center; }
-  .trow.head { color: #566078; font-weight: 600; border-bottom: 1px solid #263049; }
+  .trow { display: grid; grid-template-columns: 80px 60px 55px 85px 85px 90px 65px 80px; gap: 6px; font-size: 10.5px; padding: 6px 4px; border-bottom: 1px solid rgba(26,33,48,0.9); align-items: center; transition: background 0.15s ease; }
+  .trow.head { color: #566078; font-weight: 600; border-bottom: 1px solid rgba(38,48,73,0.9); }
+  .trow:not(.head):hover { background: rgba(74,222,143,0.03); }
   .trow .win { color: #4ade8f; } .trow .loss { color: #f87189; }
   .table-scroll { overflow-x: auto; }
   .table-inner { min-width: 660px; }
   .long-tag { color: #4ade8f; } .short-tag { color: #f87189; }
 
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; margin-bottom: 6px; }
-  .card { background: #10151f; border: 1px solid #1e2635; border-radius: 10px; padding: 15px; }
+  .card { background: linear-gradient(155deg, rgba(19,25,38,0.85), rgba(11,15,24,0.92)); backdrop-filter: blur(6px); border: 1px solid rgba(30,38,53,0.9); border-radius: 10px; padding: 15px; transition: transform 0.2s ease, box-shadow 0.2s ease; }
+  .card:hover { transform: translateY(-1px); box-shadow: 0 8px 20px rgba(0,0,0,0.3); }
   .card-top { display: flex; justify-content: space-between; align-items: flex-start; }
   .coin-label { color: #6b7688; font-size: 12px; }
   .price { font-size: 18px; font-weight: 600; color: #f1f4f8; font-family: monospace; }
@@ -111,7 +117,7 @@
     <div>
       <h1>Trading Monitor</h1>
       <div class="sub">Each strategy trades independently with its own $ per coin · live prices · no real money</div>
-      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v22 · 2026-09-04 (report fix + futuristic visual upgrade)</div>
+      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v23 · 2026-09-04 21:23 BST (position protection overhaul + full visual pass)</div>
     </div>
     <button id="refreshBtn">Refresh</button>
   </div>
@@ -135,6 +141,7 @@
       </div>
       <div style="display:flex; gap:8px;">
         <button class="primary" id="engineStartBtn">Start test</button>
+        <button class="primary" id="engineResumeBtn" style="display:none;">Resume trading</button>
         <button class="danger" id="engineResetBtn">Reset</button>
       </div>
     </div>
@@ -193,6 +200,14 @@
         <select id="engVolFilter">
           <option value="1" selected>On (skip thin-volume moves)</option>
           <option value="0">Off</option>
+        </select>
+      </span>
+      <span><label>Re-entry cooldown after stop-loss</label>
+        <select id="engCooldown">
+          <option value="0">Off</option>
+          <option value="30">30 min</option>
+          <option value="45" selected>45 min</option>
+          <option value="60">60 min</option>
         </select>
       </span>
     </div>
@@ -266,6 +281,7 @@
   <div class="grid" id="cardGrid"></div>
 
   <div class="footnote">
+    <b style="color:#93a3c2;">Build: v23 — 2026-09-04 21:23 BST</b> · Position protection overhaul: fast 1h rate-of-change trigger (replaces slow-only 24h/48h regime check), per-position early-exit trip-wire on sharp adverse moves, regime now judged per-coin instead of one BTC signal for everyone, RSI and Bollinger Bands exempted from the trend filter (mean-reversion strategies are meant to trade counter-trend), 45-min re-entry cooldown after a stop-loss (fixes the ZEC 7x-whipsaw bug), circuit breaker now has a "Resume trading" option that keeps existing balances instead of forcing a full wipe, and a real "Check news" button (Google News search, opens in new tab) on the top trade signal and every coin. Plus a full visual pass across every panel, table, chip and input.<br/>
     <b style="color:#93a3c2;">Build: v22 — 2026-09-04</b> · report can now collapse/close properly instead of staying open, glowing gradient sparkline charts with pulsing live-price dot, glassmorphism cards, glowing buttons and title. Trading logic unchanged from v21 — this is purely visual/UI, plus the report display fix.<br/>
     Assumption recorded: £/$ treated as 1:1 since prices come from USDT pairs — no live FX conversion applied. Fees assumed at 0.1% per side, no funding cost modeled. Each strategy's pot per coin is fully isolated — a loss in one never affects another. Data saved only in this browser.
   </div>
@@ -457,13 +473,24 @@ function startEngine() {
   const circuitBreakerPct = parseFloat(document.getElementById("engCircuit")?.value) || 0;
   const maxSameDirection = parseInt(document.getElementById("engMaxDir")?.value) || 0;
   const useVolumeFilter = document.getElementById("engVolFilter")?.value === "1";
+  const cooldownMinutes = parseInt(document.getElementById("engCooldown")?.value) || 0;
   const bots = {};
   BOTS.forEach(b => {
     bots[b.key] = { coins: {} };
     coinList.forEach(c => { bots[b.key].coins[c] = { cash: perCoinCapital, initial: perCoinCapital, position: null, trades: [] }; });
   });
-  engine = { startedAt: Date.now(), perCoinCapital, leverage, allowShorts, minProfit, maxHoldHours, useRegimeFilter, circuitBreakerPct, maxSameDirection, useVolumeFilter, halted: false, feePct: 0.001, bots };
+  engine = { startedAt: Date.now(), perCoinCapital, leverage, allowShorts, minProfit, maxHoldHours, useRegimeFilter, circuitBreakerPct, maxSameDirection, useVolumeFilter, cooldownMinutes, halted: false, feePct: 0.001, bots };
   engineEvents = []; localStorage.setItem("tm2_events", "[]");
+  saveEngine();
+  renderEngine();
+}
+function resumeEngine() {
+  // Resume with EXISTING balances intact — unlike Restart, this does not wipe
+  // any strategy's data. Only clears the halted flag so new trades can open again.
+  if (!engine) return;
+  engine.halted = false;
+  engine.haltedAt = null;
+  logEngineEvent("Trading resumed after circuit breaker halt (balances kept).");
   saveEngine();
   renderEngine();
 }
@@ -488,18 +515,36 @@ function runEngineStep() {
   if (!engine) return;
   coinList.forEach(coin => ensureCoinInEngine(coin));
 
-  // ---- BTC REGIME FILTER ----
-  // Research finding with the best evidence-to-effort ratio: only take trades
-  // aligned with the broader market direction. Yesterday every bot shorted into
-  // a market that then turned bullish — a regime filter blocks exactly that.
-  // Bullish regime = BTC above both its ~24h and ~48h averages; bearish = below both;
-  // mixed = no clear regime.
-  let regime = "mixed";
-  const btc = state["BTC"] || wideState["BTC"];
-  if (btc && btc.price && btc.sma96 && btc.sma192) {
-    if (btc.price > btc.sma96 && btc.price > btc.sma192) regime = "bull";
-    else if (btc.price < btc.sma96 && btc.price < btc.sma192) regime = "bear";
+  // ---- MARKET REGIME ----
+  // v22 fix: was BTC-only and used a slow 24h/48h average, which lagged real
+  // moves by hours (confirmed cause of most of a -$707 loss day). Now: (1) each
+  // coin gets its OWN regime rather than one BTC signal gating everything, and
+  // (2) a fast rate-of-change check can override the slow average the moment a
+  // sharp move happens, instead of waiting for the average to catch up.
+  function fastROC(closes, period = 4) { // 4 x 15m = ~1h
+    if (!closes || closes.length <= period) return null;
+    const past = closes[closes.length - 1 - period], now = closes[closes.length - 1];
+    return past ? ((now - past) / past) * 100 : null;
   }
+  function coinRegime(s) {
+    if (!s || !s.price) return "mixed";
+    let slow = "mixed";
+    if (s.sma96 && s.sma192) {
+      if (s.price > s.sma96 && s.price > s.sma192) slow = "bull";
+      else if (s.price < s.sma96 && s.price < s.sma192) slow = "bear";
+    }
+    const roc = fastROC(s.closes);
+    if (roc !== null) {
+      if (roc <= -1.5) return "bear"; // sharp 1h drop overrides the slow average
+      if (roc >= 1.5) return "bull";
+    }
+    return slow;
+  }
+
+  // BTC regime kept only for the dashboard summary box (informational) — actual
+  // trade gating below uses each coin's own regime instead.
+  const btc = state["BTC"] || wideState["BTC"];
+  const regime = coinRegime(btc);
   const prevRegime = engine.currentRegime;
   engine.currentRegime = regime;
 
@@ -509,25 +554,54 @@ function runEngineStep() {
   // stop — roughly $450 of damage at the observed average loss. These two guards
   // close positions that are on the wrong side of a changed market.
 
-  // 1. Regime flip: market direction reversed, so exit positions fighting it.
-  if (engine.useRegimeFilter !== false && prevRegime && prevRegime !== regime && regime !== "mixed") {
+  // 1. Regime flip: each coin's OWN direction reversed, so exit positions
+  //    fighting it. Uses per-coin regime now, not one BTC signal for everything.
+  //    RSI and Bollinger are exempt — they're mean-reversion strategies designed
+  //    to trade AGAINST short-term direction, so forcing them to obey a trend
+  //    filter defeats their purpose.
+  if (engine.useRegimeFilter !== false) {
     let flipClosed = 0;
     BOTS.forEach(bot => {
       if (!toggles[bot.key]) return;
+      if (bot.key === "rsi" || bot.key === "boll") return; // exempt mean-reversion
       coinList.forEach(coin => {
         const acc = engine.bots[bot.key].coins[coin];
         const s = state[coin];
         if (!acc || !acc.position || !s || !s.price) return;
-        const wrongSide = (regime === "bear" && acc.position.side === "Long") ||
-                          (regime === "bull" && acc.position.side === "Short");
+        const coinReg = coinRegime(s);
+        const wrongSide = (coinReg === "bear" && acc.position.side === "Long") ||
+                          (coinReg === "bull" && acc.position.side === "Short");
         if (wrongSide) {
-          closeFullPosition(acc, acc.position, s.price, `Regime flipped to ${regime}`, Date.now(), engine);
+          closeFullPosition(acc, acc.position, s.price, `Regime flipped to ${coinReg}`, Date.now(), engine);
           flipClosed++;
         }
       });
     });
-    if (flipClosed) logEngineEvent(`Market regime flipped ${prevRegime} → ${regime}. Closed ${flipClosed} positions on the wrong side.`);
+    if (flipClosed) logEngineEvent(`Regime check closed ${flipClosed} position(s) now fighting their coin's own trend.`);
   }
+
+  // 1b. Per-position early-exit trip-wire — independent of the portfolio-level
+  // circuit breaker below. If a coin makes a sharp adverse move (fast ROC) while
+  // a position is open and already underwater, exit now rather than waiting for
+  // the stop-loss to eventually catch up.
+  BOTS.forEach(bot => {
+    if (!toggles[bot.key]) return;
+    coinList.forEach(coin => {
+      const acc = engine.bots[bot.key].coins[coin];
+      const s = state[coin];
+      if (!acc || !acc.position || !s || !s.price) return;
+      const p = acc.position;
+      const roc = fastROC(s.closes);
+      if (roc === null) return;
+      const movingAgainst = (p.side === "Long" && roc <= -2.0) || (p.side === "Short" && roc >= 2.0);
+      if (!movingAgainst) return;
+      const movePct = p.side === "Long" ? (s.price - p.entry) / p.entry : (p.entry - s.price) / p.entry;
+      if (movePct < 0) { // only trips if the position is already losing, not just volatile
+        closeFullPosition(acc, p, s.price, "Early exit (rapid adverse move)", Date.now(), engine);
+        logEngineEvent(`${bot.label} ${coin}: early exit on a sharp ${roc.toFixed(1)}% 1h move against the position.`);
+      }
+    });
+  });
 
   // 2. Portfolio circuit breaker: if total open losses exceed the limit, close
   //    everything and stop opening new trades until the user restarts. This is a
@@ -617,13 +691,24 @@ function runEngineStep() {
         else if (sig === "bear" && engine.allowShorts) side = "Short";
         if (!side) return;
 
-        // Regime gate: don't fight the broader market. In a bullish BTC regime
-        // take longs only; in a bearish regime take shorts only; in a mixed
-        // regime take nothing (this is when choppy conditions eat trend systems).
-        if (engine.useRegimeFilter !== false) {
-          if (regime === "bull" && side !== "Long") return;
-          if (regime === "bear" && side !== "Short") return;
-          if (regime === "mixed") return;
+        // Re-entry cooldown: confirmed bug where ZEC re-entered long 7 times in
+        // ~15 minutes, each stopped straight out, before finally working. After
+        // a stop-loss, that coin+strategy+direction is blocked for a cooldown
+        // window rather than re-entering the moment the signal flickers back on.
+        const cooldownMin = engine.cooldownMinutes !== undefined ? engine.cooldownMinutes : 45;
+        if (cooldownMin > 0 && acc.cooldownUntil && acc.cooldownUntil[side] && Date.now() < acc.cooldownUntil[side]) {
+          return;
+        }
+
+        // Regime gate: don't fight the coin's own broader direction. Uses each
+        // coin's own regime now (not one BTC signal for everything). RSI and
+        // Bollinger are exempt — they're built to trade AGAINST short-term
+        // direction, so a trend filter would defeat their purpose.
+        if (engine.useRegimeFilter !== false && bot.key !== "rsi" && bot.key !== "boll") {
+          const coinReg = coinRegime(s);
+          if (coinReg === "bull" && side !== "Long") return;
+          if (coinReg === "bear" && side !== "Short") return;
+          if (coinReg === "mixed") return;
         }
 
         // Volume confirmation filter: skip entries where the move isn't backed
@@ -725,6 +810,16 @@ function closeFullPosition(acc, p, exitPrice, exitReason, exitTime, engine) {
     reason: p.reason, exitPrice, exitReason, closedAt: exitTime || Date.now(),
     grossPnl, fees, netPnl, balanceAfter: acc.cash, result: netPnl >= 0 ? "Win" : "Loss",
   });
+  // Re-entry cooldown: block this exact coin+strategy+direction for a while
+  // after a stop-loss, so a whipsawing signal can't immediately re-open the
+  // same losing trade over and over (the ZEC bug — 7 re-entries in 15 minutes).
+  if (exitReason === "Stop-loss hit") {
+    const cooldownMin = engine.cooldownMinutes !== undefined ? engine.cooldownMinutes : 45;
+    if (cooldownMin > 0) {
+      if (!acc.cooldownUntil) acc.cooldownUntil = {};
+      acc.cooldownUntil[p.side] = (exitTime || Date.now()) + cooldownMin * 60000;
+    }
+  }
   acc.position = null;
 }
 
@@ -735,6 +830,7 @@ function renderEngine() {
     ? `$${engine.perCoinCapital} per coin per strategy · ${engine.leverage}x leverage · shorts ${engine.allowShorts ? "on" : "off"}`
     : "Each enabled strategy gets its own separate pot per coin, so you can see which one actually performs best.";
   document.getElementById("engineStartBtn").textContent = started ? "Restart test" : "Start test";
+  document.getElementById("engineResumeBtn").style.display = (started && engine.halted) ? "inline-block" : "none";
 
   const activeBots = BOTS.filter(b => toggles[b.key]);
   if (!started || !activeBots.length) {
@@ -845,7 +941,7 @@ function renderEngine() {
   ` : `<div style="color:#566078;font-size:12.5px;padding:6px 0;">Nothing open right now.</div>`;
 
   document.getElementById("bigSummary").innerHTML = `
-    ${engine.halted ? `<div class="banner" style="background:#3a1420;border-color:#6b1f39;color:#f8a8b6;"><b>TRADING HALTED</b> — the circuit breaker fired at ${new Date(engine.haltedAt).toLocaleString()}. All positions were closed and no new trades will open. Press "Restart test" to resume.</div>` : ""}
+    ${engine.halted ? `<div class="banner" style="background:#3a1420;border-color:#6b1f39;color:#f8a8b6;"><b>TRADING HALTED</b> — the circuit breaker fired at ${new Date(engine.haltedAt).toLocaleString()}. All open positions were closed. Press "Resume trading" below to continue with your existing balances, or "Restart test" for a clean slate.</div>` : ""}
     <div class="big-summary">
       <div class="big-box highlight">
         <div class="big-label">Booked profit (closed)</div>
@@ -1318,6 +1414,10 @@ function buildScan() {
   }).sort((a, b) => b.score - a.score);
 }
 
+function newsSearchUrl(coin) {
+  const q = encodeURIComponent(`${coin} crypto regulation OR SEC OR ban OR lawsuit OR delisting`);
+  return `https://news.google.com/search?q=${q}&hl=en-US`;
+}
 function buildTradePlan(item) {
   const { coin, direction, score, s } = item;
   const entry = s.price;
@@ -1388,7 +1488,9 @@ function renderScanner() {
       </div>
       <div style="margin-top:10px; font-size:12px; color:#93a3c2;"><b>Why:</b><br/>${plan.reasons.map(r => "• " + r).join("<br/>")}</div>
       <div style="margin-top:10px; font-size:12px; color:#e0ac4c; background:#2a1f0d; border:1px solid #6b4e17; border-radius:6px; padding:8px 10px;">
-        <b>News/catalyst check:</b> not automated. Before acting on this, ask Claude directly: "any news on ${plan.coin} that could affect this trade?"
+        <b>News/catalyst check:</b> full analysis isn't automated — but here's a one-tap check.
+        <button onclick="window.open('${newsSearchUrl(plan.coin)}','_blank')" style="margin-top:6px; display:block; font-size:11.5px; padding:6px 10px;">🔎 Check news for ${plan.coin}</button>
+        <div style="margin-top:4px; font-size:10.5px; color:#a5793a;">Or ask Claude directly: "any news on ${plan.coin} that could affect this trade?"</div>
       </div>
       <div style="margin-top:8px; font-size:11px; color:#566078;">Invalid if price closes back through $${fmt(plan.stop, decimalsFor(plan.stop))}. This is not a guaranteed win — it's the strongest setup currently available among your tracked coins.</div>
     </div>`;
@@ -1417,7 +1519,7 @@ function renderCards() {
       const lean = bull > bear ? "bull" : bear > bull ? "bear" : "flat";
       const inTrade = engine && BOTS.some(b => toggles[b.key] && engine.bots[b.key] && engine.bots[b.key].coins[ticker] && engine.bots[b.key].coins[ticker].position);
       return `<div class="compact-row">
-        <span style="font-weight:600;">${ticker}${inTrade ? ` <span style="color:#4ade8f;font-size:9px;">IN TRADE</span>` : ""}</span>
+        <span style="font-weight:600;">${ticker}${inTrade ? ` <span style="color:#4ade8f;font-size:9px;">IN TRADE</span>` : ""} <span title="Check news" onclick="window.open('${newsSearchUrl(ticker)}','_blank')" style="cursor:pointer; opacity:0.6;">🔎</span></span>
         <span style="font-family:monospace;">${s.price ? "$" + fmt(s.price, d) : "—"}</span>
         <span style="color:#566078;">RSI ${ind.rsi && ind.rsi.value !== null && ind.rsi.value !== undefined ? ind.rsi.value.toFixed(0) : "—"}</span>
         <span style="color:#566078;">ATR ${s.atrPct ? (s.atrPct * 100).toFixed(1) + "%" : "—"}</span>
@@ -1456,6 +1558,7 @@ document.getElementById("refreshBtn").addEventListener("click", refresh);
 document.getElementById("coinViewMode").addEventListener("change", renderCards);
 document.getElementById("addCoinBtn").addEventListener("click", () => { const i = document.getElementById("newCoinInput"); addCoin(i.value); i.value = ""; });
 document.getElementById("engineStartBtn").addEventListener("click", startEngine);
+document.getElementById("engineResumeBtn").addEventListener("click", resumeEngine);
 document.getElementById("engineResetBtn").addEventListener("click", resetEngine);
 document.getElementById("genReportBtn").addEventListener("click", showReport);
 document.getElementById("reportToggleBtn").addEventListener("click", toggleReport);
