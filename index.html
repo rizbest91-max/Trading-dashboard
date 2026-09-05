@@ -117,7 +117,7 @@
     <div>
       <h1>Trading Monitor</h1>
       <div class="sub">Each strategy trades independently with its own $ per coin · live prices · no real money</div>
-      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v23 · 2026-09-04 21:23 BST (position protection overhaul + full visual pass)</div>
+      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v24 · 2026-09-05 14:09 BST (data completeness + cooldown-on-early-exit + re-entry transparency)</div>
     </div>
     <button id="refreshBtn">Refresh</button>
   </div>
@@ -281,6 +281,7 @@
   <div class="grid" id="cardGrid"></div>
 
   <div class="footnote">
+    <b style="color:#93a3c2;">Build: v24 — 2026-09-05 14:09 BST</b> · Data completeness pass (entry timestamp, duration, MAE%/MFE%, build tag in reports, concurrent open-position count + direction split at entry, RSI/MACD/regime/ATR/volume snapshot at entry, exposure-cap-blocked events logged). Amended before first run based on a v23 report showing RSI/Bollinger Bands whipsawing via "Early exit" 64 times in 7.5h with a 5-6% win rate: the re-entry cooldown now also triggers on "Early exit (rapid adverse move)", not just "Stop-loss hit". Every trade's reason field also now notes when it's re-entering shortly after a related recent close on the same coin ("re-entry 12m after Early exit, Loss, on this coin"), for transparency in review — this doesn't block the trade, the cooldown does that; it just makes the pattern visible in the report. Purely additive/protective — no strategy signal logic changed.<br/>
     <b style="color:#93a3c2;">Build: v23 — 2026-09-04 21:23 BST</b> · Position protection overhaul: fast 1h rate-of-change trigger (replaces slow-only 24h/48h regime check), per-position early-exit trip-wire on sharp adverse moves, regime now judged per-coin instead of one BTC signal for everyone, RSI and Bollinger Bands exempted from the trend filter (mean-reversion strategies are meant to trade counter-trend), 45-min re-entry cooldown after a stop-loss (fixes the ZEC 7x-whipsaw bug), circuit breaker now has a "Resume trading" option that keeps existing balances instead of forcing a full wipe, and a real "Check news" button (Google News search, opens in new tab) on the top trade signal and every coin. Plus a full visual pass across every panel, table, chip and input.<br/>
     <b style="color:#93a3c2;">Build: v22 — 2026-09-04</b> · report can now collapse/close properly instead of staying open, glowing gradient sparkline charts with pulsing live-price dot, glassmorphism cards, glowing buttons and title. Trading logic unchanged from v21 — this is purely visual/UI, plus the report display fix.<br/>
     Assumption recorded: £/$ treated as 1:1 since prices come from USDT pairs — no live FX conversion applied. Fees assumed at 0.1% per side, no funding cost modeled. Each strategy's pot per coin is fully isolated — a loss in one never affects another. Data saved only in this browser.
@@ -292,6 +293,8 @@
 // can actually work on them). More coins = more signals = a usable sample size
 // sooner. The exposure cap keeps total risk in check, so a wider list gives the
 // system more to choose from rather than more to pile into.
+const BUILD_TAG = "v24 · 2026-09-05 14:09 BST (amended: cooldown + re-entry transparency)";
+
 const DEFAULT_COINS = [
   "BTC", "ETH", "SOL", "BNB", "ADA", "XRP", "DOGE", "AVAX",
   "LINK", "DOT", "ATOM", "UNI", "AAVE", "NEAR", "ARB", "OP",
@@ -663,6 +666,18 @@ function runEngineStep() {
           const hi = s.highs[i], lo = s.lows[i];
           const candleTime = s.times[i];
           const isLong = p.side === "Long";
+
+          // MAE/MFE tracking: how far did price move against us (adverse) and in
+          // our favor (favorable) at any point during this candle, regardless of
+          // whether the trade eventually won or lost. Updated every scan so it
+          // reflects the true worst/best excursion, not just the closing price.
+          const adverseExtreme = isLong ? lo : hi;
+          const favorableExtreme = isLong ? hi : lo;
+          const adversePct = isLong ? (p.entry - adverseExtreme) / p.entry * 100 : (adverseExtreme - p.entry) / p.entry * 100;
+          const favorablePct = isLong ? (favorableExtreme - p.entry) / p.entry * 100 : (p.entry - favorableExtreme) / p.entry * 100;
+          if (adversePct > p.maePct) p.maePct = adversePct;
+          if (favorablePct > p.mfePct) p.mfePct = favorablePct;
+
           const hitStop = isLong ? lo <= p.stop : hi >= p.stop;
           const hitTarget = isLong ? hi >= p.target : lo <= p.target;
 
@@ -727,7 +742,18 @@ function runEngineStep() {
             const a2 = engine.bots[bot.key].coins[c2];
             if (a2 && a2.position && a2.position.side === side) sameDir++;
           });
-          if (sameDir >= engine.maxSameDirection) return;
+          if (sameDir >= engine.maxSameDirection) {
+            // Log the block, but throttle to once per coin+bot+direction per 10
+            // minutes so this doesn't spam the event log every refresh cycle.
+            const key = `${bot.key}_${coin}_${side}`;
+            if (!engine.lastCapBlockLog) engine.lastCapBlockLog = {};
+            const lastLog = engine.lastCapBlockLog[key] || 0;
+            if (Date.now() - lastLog > 10 * 60000) {
+              logEngineEvent(`${bot.label} blocked from opening ${side} ${coin} — already at the ${engine.maxSameDirection}-position exposure cap.`);
+              engine.lastCapBlockLog[key] = Date.now();
+            }
+            return;
+          }
         }
 
         const entry = s.price;
@@ -778,11 +804,47 @@ function runEngineStep() {
         // so we can later check whether high-score entries actually perform better.
         let entryScore = null;
         try { entryScore = scoreDirection(s, side === "Long" ? "long" : "short"); } catch (e) { /* scorer unavailable */ }
+
+        // Concurrent open-position count + direction split at the moment of entry —
+        // needed for real portfolio/correlation analysis (previously only ever
+        // captured as a single manual screenshot).
+        let concurrentOpen = 0, concurrentLong = 0, concurrentShort = 0;
+        BOTS.forEach(b2 => { if (!toggles[b2.key]) return; coinList.forEach(c2 => {
+          const a2 = engine.bots[b2.key] && engine.bots[b2.key].coins[c2];
+          if (a2 && a2.position) { concurrentOpen++; if (a2.position.side === "Long") concurrentLong++; else concurrentShort++; }
+        }); });
+
+        // Snapshot of key indicator values at entry — lets a later review tell
+        // "strategy was right but got unlucky" apart from "signal itself was weak".
+        const entrySnapshot = {
+          rsi: s.indicators.rsi.value,
+          macdHist: s.indicators.macd.hist,
+          regime: (bot.key !== "rsi" && bot.key !== "boll") ? coinRegime(s) : "exempt",
+          atrPct: s.atrPct,
+          volRatio: s.volRatio,
+        };
+
+        // Transparency note: if this coin+strategy+direction closed recently
+        // (within 6h), record why it's opening again on the same setup rather
+        // than presenting it as an unrelated fresh trade. Purely informational —
+        // does not affect whether the trade opens (the cooldown above already
+        // handles that gate for losing exits).
+        let reasonText = bot.label + " signal";
+        if (acc.lastClose && acc.lastClose[side]) {
+          const lc = acc.lastClose[side];
+          const hoursSince = (Date.now() - lc.time) / 3600000;
+          if (hoursSince < 6) {
+            reasonText += ` (re-entry ${hoursSince < 1 ? Math.round(hoursSince * 60) + "m" : hoursSince.toFixed(1) + "h"} after ${lc.reason}, ${lc.result}, on this coin)`;
+          }
+        }
+
         acc.cash -= margin;
         acc.position = {
           coin, bot: bot.key, side, entry, stop, target, entryScore,
           leverage: engine.leverage, margin, notional, expectedNet,
-          riskReward: rr, reason: bot.label + " signal", openedAt: Date.now(),
+          riskReward: rr, reason: reasonText, openedAt: Date.now(),
+          concurrentOpen, concurrentLong, concurrentShort, entrySnapshot,
+          maePct: 0, mfePct: 0, // running worst/best excursion, updated on every exit-check scan
         };
       }
     });
@@ -803,23 +865,48 @@ function closeFullPosition(acc, p, exitPrice, exitReason, exitTime, engine) {
   const fees = p.notional * engine.feePct * 2;
   const netPnl = grossPnl - fees;
   acc.cash += p.margin + netPnl;
+
+  // Finalize MAE/MFE with the exit price itself as one more data point — covers
+  // exit paths (regime-flip, early-exit, timeout) that close on current price
+  // rather than a scanned historical candle.
+  const isLong = p.side === "Long";
+  const exitAdversePct = isLong ? (p.entry - exitPrice) / p.entry * 100 : (exitPrice - p.entry) / p.entry * 100;
+  const exitFavorablePct = isLong ? (exitPrice - p.entry) / p.entry * 100 : (p.entry - exitPrice) / p.entry * 100;
+  const finalMae = Math.max(p.maePct || 0, exitAdversePct);
+  const finalMfe = Math.max(p.mfePct || 0, exitFavorablePct);
+  const closedAtTime = exitTime || Date.now();
+  const durationHrs = p.openedAt ? (closedAtTime - p.openedAt) / 3600000 : null;
+
   acc.trades.unshift({
     coin: p.coin, bot: p.bot, side: p.side, entry: p.entry, stop: p.stop, target: p.target,
     entryScore: p.entryScore,
     leverage: p.leverage, margin: p.margin, notional: p.notional, riskReward: p.riskReward,
-    reason: p.reason, exitPrice, exitReason, closedAt: exitTime || Date.now(),
+    reason: p.reason, exitPrice, exitReason, closedAt: closedAtTime,
     grossPnl, fees, netPnl, balanceAfter: acc.cash, result: netPnl >= 0 ? "Win" : "Loss",
+    openedAt: p.openedAt, durationHrs, maePct: finalMae, mfePct: finalMfe,
+    concurrentOpen: p.concurrentOpen, concurrentLong: p.concurrentLong, concurrentShort: p.concurrentShort,
+    entrySnapshot: p.entrySnapshot,
   });
   // Re-entry cooldown: block this exact coin+strategy+direction for a while
-  // after a stop-loss, so a whipsawing signal can't immediately re-open the
-  // same losing trade over and over (the ZEC bug — 7 re-entries in 15 minutes).
-  if (exitReason === "Stop-loss hit") {
+  // after a losing exit, so a whipsawing signal can't immediately re-open the
+  // same losing trade over and over. Originally only covered "Stop-loss hit"
+  // (fixed the ZEC bug — 7 re-entries in 15 min), but the 05 Sep report showed
+  // the exact same pattern via "Early exit" instead — RSI/Bollinger Bands,
+  // exempt from the regime filter, kept re-triggering the early-exit trip-wire
+  // on the same coin within minutes. Now covers both exit types.
+  const isCooldownTrigger = exitReason === "Stop-loss hit" || exitReason === "Early exit (rapid adverse move)";
+  if (isCooldownTrigger) {
     const cooldownMin = engine.cooldownMinutes !== undefined ? engine.cooldownMinutes : 45;
     if (cooldownMin > 0) {
       if (!acc.cooldownUntil) acc.cooldownUntil = {};
       acc.cooldownUntil[p.side] = (exitTime || Date.now()) + cooldownMin * 60000;
     }
   }
+  // Track the most recent close per side so a future re-entry can note WHY it's
+  // choosing to open again on a coin that recently closed — transparency for
+  // review, not a trading decision. Recorded regardless of win/loss.
+  if (!acc.lastClose) acc.lastClose = {};
+  acc.lastClose[p.side] = { reason: exitReason, time: exitTime || Date.now(), price: exitPrice, result: netPnl >= 0 ? "Win" : "Loss" };
   acc.position = null;
 }
 
@@ -992,7 +1079,7 @@ function generateReport() {
   if (!engine) { alert("Start the test first."); return ""; }
   const activeBots = BOTS.filter(b => toggles[b.key]);
   let out = "";
-  out += `STRATEGY COMPARISON REPORT\nGenerated: ${new Date().toLocaleString()}\nRunning since: ${new Date(engine.startedAt).toLocaleString()}\n`;
+  out += `STRATEGY COMPARISON REPORT\nGenerated: ${new Date().toLocaleString()}\nRunning since: ${new Date(engine.startedAt).toLocaleString()}\nBuild: ${BUILD_TAG}\n`;
   out += `Assumption: $ per coin per strategy = $${engine.perCoinCapital}, treated 1:1 with £. Leverage ${engine.leverage}x. Fees 0.1% per side, no funding modeled.\n\n`;
 
   out += `=== STRATEGY TOTALS (all coins combined) ===\n`;
@@ -1065,7 +1152,14 @@ function generateReport() {
   if (!allTrades.length) out += "No trades closed yet.\n";
   allTrades.forEach(t => {
     const pd = decimalsFor(t.entry);
-    out += `[${new Date(t.closedAt).toLocaleString()}] ${t.botLabel} | ${t.coin} ${t.side} | Score at entry: ${t.entryScore == null ? "n/a" : t.entryScore} | Entry $${fmt(t.entry, pd)} Stop $${fmt(t.stop, pd)} Target $${fmt(t.target, pd)} | Lev ${t.leverage}x | R:R ${fmt(t.riskReward, 1)} | Exit $${fmt(t.exitPrice, pd)} (${t.exitReason}) | Gross $${fmt(t.grossPnl)} Fees $${fmt(t.fees)} Net $${fmt(t.netPnl)} | Balance after $${fmt(t.balanceAfter)} | ${t.result}\n`;
+    const entryTimeStr = t.openedAt ? new Date(t.openedAt).toLocaleString() : "n/a";
+    const durStr = (t.durationHrs !== null && t.durationHrs !== undefined) ? fmt(t.durationHrs, 2) + "h" : "n/a";
+    const maeStr = (t.maePct !== undefined) ? fmt(t.maePct, 2) + "%" : "n/a";
+    const mfeStr = (t.mfePct !== undefined) ? fmt(t.mfePct, 2) + "%" : "n/a";
+    const concStr = (t.concurrentOpen !== undefined) ? `${t.concurrentOpen} open (${t.concurrentLong}L/${t.concurrentShort}S)` : "n/a";
+    const snap = t.entrySnapshot || {};
+    const snapStr = `RSI ${snap.rsi != null ? snap.rsi.toFixed(1) : "n/a"}, MACD hist ${snap.macdHist != null ? snap.macdHist.toFixed(3) : "n/a"}, regime ${snap.regime || "n/a"}, ATR ${snap.atrPct != null ? (snap.atrPct*100).toFixed(2)+"%" : "n/a"}, vol ${snap.volRatio != null ? snap.volRatio.toFixed(2)+"x" : "n/a"}`;
+    out += `[${new Date(t.closedAt).toLocaleString()}] ${t.botLabel} | ${t.coin} ${t.side} | Entered: ${entryTimeStr} | Duration: ${durStr} | Reason for entry: ${t.reason || "n/a"} | Score at entry: ${t.entryScore == null ? "n/a" : t.entryScore} | Entry $${fmt(t.entry, pd)} Stop $${fmt(t.stop, pd)} Target $${fmt(t.target, pd)} | Lev ${t.leverage}x | R:R ${fmt(t.riskReward, 1)} | MAE ${maeStr} MFE ${mfeStr} | Concurrent: ${concStr} | Entry snapshot: ${snapStr} | Exit $${fmt(t.exitPrice, pd)} (${t.exitReason}) | Gross $${fmt(t.grossPnl)} Fees $${fmt(t.fees)} Net $${fmt(t.netPnl)} | Balance after $${fmt(t.balanceAfter)} | ${t.result}\n`;
   });
 
   return out;
