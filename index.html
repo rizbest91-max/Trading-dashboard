@@ -152,7 +152,7 @@
     <div>
       <h1>Trading Monitor</h1>
       <div class="sub">Each strategy trades independently with its own $ per coin · live prices · no real money</div>
-      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v25 · 2026-09-05 (visual/UX evolution — 3D depth, regime orb, strategy bubble map, scanner radar, position price-paths)</div>
+      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v26 · 2026-09-06 04:17 BST (RSI/Bollinger early-exit grace period, footer changelog removed)</div>
     </div>
     <button id="refreshBtn">Refresh</button>
   </div>
@@ -326,11 +326,8 @@
   </div>
   <div class="grid" id="cardGrid"></div>
 
-  <div class="footnote">
-    <b style="color:#93a3c2;">Build: v25 — 2026-09-05</b> · Visual/UX evolution — zero trading-logic changes, so no Reset needed. Sticky jump-nav (Live/Strategies/Positions/Scanner/Research/Settings) on a single scrolling page, not tabs, so nothing is hidden during debugging. Foundational 3D depth pass across all cards/panels (layered shadows, subtle tilt-on-hover via CSS transforms only — no WebGL, kept lightweight for 24/7 unattended running). BTC regime shown as a glossy radial orb instead of a flat box. Strategy performance gets a bubble map (win rate × net P/L × trade count) alongside the existing cards, both showing the same numbers. Scanner gets a radar layout (qualifying coins arranged by score-strength around a center hub) above the existing ranked table. Open positions get a visual price-path strip (Entry→Current→Stop→Target) under each row, on top of all existing columns. Every existing data point, table, and button is unchanged — this only adds a visual layer on top.<br/>
-    <b style="color:#93a3c2;">Build: v24 — 2026-09-05 14:09 BST</b> · Data completeness pass (entry timestamp, duration, MAE%/MFE%, build tag in reports, concurrent open-position count + direction split at entry, RSI/MACD/regime/ATR/volume snapshot at entry, exposure-cap-blocked events logged). Amended before first run based on a v23 report showing RSI/Bollinger Bands whipsawing via "Early exit" 64 times in 7.5h with a 5-6% win rate: the re-entry cooldown now also triggers on "Early exit (rapid adverse move)", not just "Stop-loss hit". Every trade's reason field also now notes when it's re-entering shortly after a related recent close on the same coin ("re-entry 12m after Early exit, Loss, on this coin"), for transparency in review — this doesn't block the trade, the cooldown does that; it just makes the pattern visible in the report. Purely additive/protective — no strategy signal logic changed.<br/>
-    <b style="color:#93a3c2;">Build: v23 — 2026-09-04 21:23 BST</b> · Position protection overhaul: fast 1h rate-of-change trigger (replaces slow-only 24h/48h regime check), per-position early-exit trip-wire on sharp adverse moves, regime now judged per-coin instead of one BTC signal for everyone, RSI and Bollinger Bands exempted from the trend filter (mean-reversion strategies are meant to trade counter-trend), 45-min re-entry cooldown after a stop-loss (fixes the ZEC 7x-whipsaw bug), circuit breaker now has a "Resume trading" option that keeps existing balances instead of forcing a full wipe, and a real "Check news" button (Google News search, opens in new tab) on the top trade signal and every coin. Plus a full visual pass across every panel, table, chip and input.<br/>
-    <b style="color:#93a3c2;">Build: v22 — 2026-09-04</b> · report can now collapse/close properly instead of staying open, glowing gradient sparkline charts with pulsing live-price dot, glassmorphism cards, glowing buttons and title. Trading logic unchanged from v21 — this is purely visual/UI, plus the report display fix.<br/>
+  <div class="footnote" style="text-align:center;">
+    <span style="font-family:monospace; color:#4a5568; font-size:11px;">Build v26</span> · Full version history moved to the Excel research register — this footer no longer duplicates it.<br/>
     Assumption recorded: £/$ treated as 1:1 since prices come from USDT pairs — no live FX conversion applied. Fees assumed at 0.1% per side, no funding cost modeled. Each strategy's pot per coin is fully isolated — a loss in one never affects another. Data saved only in this browser.
   </div>
 </div>
@@ -340,7 +337,7 @@
 // can actually work on them). More coins = more signals = a usable sample size
 // sooner. The exposure cap keeps total risk in check, so a wider list gives the
 // system more to choose from rather than more to pile into.
-const BUILD_TAG = "v25 · 2026-09-05 (visual/UX evolution, no logic changes)";
+const BUILD_TAG = "v26 · 2026-09-06 04:17 BST (RSI/Bollinger early-exit grace period, footer changelog removed)";
 
 const DEFAULT_COINS = [
   "BTC", "ETH", "SOL", "BNB", "ADA", "XRP", "DOGE", "AVAX",
@@ -736,6 +733,18 @@ function runEngineStep() {
   // circuit breaker below. If a coin makes a sharp adverse move (fast ROC) while
   // a position is open and already underwater, exit now rather than waiting for
   // the stop-loss to eventually catch up.
+  //
+  // v26 fix: RSI and Bollinger Bands are exempt for the first 20 minutes of a
+  // trade's life. Evidence (06 Sep report, 70 trades): these two strategies
+  // enter BECAUSE of a recent sharp move (that's literally what "oversold" or
+  // "outside the band" means) — so the trip-wire's "sharp 1h move against the
+  // position" condition is very often already true the moment the trade opens,
+  // not a new development. Median duration on affected trades was 1-2 minutes,
+  // with MFE (0.78-1.17%) actually exceeding MAE (0.44-0.60%) — these weren't
+  // hopeless trades, they were cut before the thesis had any time to play out.
+  // After 20 minutes the trip-wire applies normally, since a genuinely
+  // developing adverse move is worth reacting to regardless of strategy.
+  const EARLY_EXIT_GRACE_MS = { rsi: 20 * 60000, boll: 20 * 60000 };
   BOTS.forEach(bot => {
     if (!toggles[bot.key]) return;
     coinList.forEach(coin => {
@@ -743,6 +752,8 @@ function runEngineStep() {
       const s = state[coin];
       if (!acc || !acc.position || !s || !s.price) return;
       const p = acc.position;
+      const grace = EARLY_EXIT_GRACE_MS[bot.key];
+      if (grace && (Date.now() - p.openedAt) < grace) return; // still in grace period
       const roc = fastROC(s.closes);
       if (roc === null) return;
       const movingAgainst = (p.side === "Long" && roc <= -2.0) || (p.side === "Short" && roc >= 2.0);
