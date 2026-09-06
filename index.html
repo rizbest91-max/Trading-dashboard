@@ -152,7 +152,7 @@
     <div>
       <h1>Trading Monitor</h1>
       <div class="sub">Each strategy trades independently with its own $ per coin · live prices · no real money</div>
-      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v26 · 2026-09-06 04:17 BST (RSI/Bollinger early-exit grace period, footer changelog removed)</div>
+      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v27 · 2026-09-06 04:31 BST (regime-flip confirmation — requires 2 consecutive checks before closing)</div>
     </div>
     <button id="refreshBtn">Refresh</button>
   </div>
@@ -327,7 +327,7 @@
   <div class="grid" id="cardGrid"></div>
 
   <div class="footnote" style="text-align:center;">
-    <span style="font-family:monospace; color:#4a5568; font-size:11px;">Build v26</span> · Full version history moved to the Excel research register — this footer no longer duplicates it.<br/>
+    <span style="font-family:monospace; color:#4a5568; font-size:11px;">Build v27</span> · Full version history moved to the Excel research register — this footer no longer duplicates it.<br/>
     Assumption recorded: £/$ treated as 1:1 since prices come from USDT pairs — no live FX conversion applied. Fees assumed at 0.1% per side, no funding cost modeled. Each strategy's pot per coin is fully isolated — a loss in one never affects another. Data saved only in this browser.
   </div>
 </div>
@@ -337,7 +337,7 @@
 // can actually work on them). More coins = more signals = a usable sample size
 // sooner. The exposure cap keeps total risk in check, so a wider list gives the
 // system more to choose from rather than more to pile into.
-const BUILD_TAG = "v26 · 2026-09-06 04:17 BST (RSI/Bollinger early-exit grace period, footer changelog removed)";
+const BUILD_TAG = "v27 · 2026-09-06 04:31 BST (regime-flip confirmation)";
 
 const DEFAULT_COINS = [
   "BTC", "ETH", "SOL", "BNB", "ADA", "XRP", "DOGE", "AVAX",
@@ -708,6 +708,15 @@ function runEngineStep() {
   //    RSI and Bollinger are exempt — they're mean-reversion strategies designed
   //    to trade AGAINST short-term direction, so forcing them to obey a trend
   //    filter defeats their purpose.
+  //
+  // v27 fix: requires the mismatch to hold for 2 CONSECUTIVE checks (~60s)
+  // before closing. Evidence: a fresh v26 run showed FIL and MARSCOIN opening
+  // and regime-flip-exiting 31 seconds apart on sub-1% price noise — the fast
+  // 1h rate-of-change trigger has no hysteresis, so a value sitting near its
+  // ±1.5% threshold can cross back and forth on ordinary noise, closing real
+  // positions and charging real fees for nothing. This doesn't slow down
+  // genuine reversals meaningfully (60s vs instant) but filters out the
+  // single-tick noise case.
   if (engine.useRegimeFilter !== false) {
     let flipClosed = 0;
     BOTS.forEach(bot => {
@@ -717,16 +726,22 @@ function runEngineStep() {
         const acc = engine.bots[bot.key].coins[coin];
         const s = state[coin];
         if (!acc || !acc.position || !s || !s.price) return;
+        const p = acc.position;
         const coinReg = coinRegime(s);
-        const wrongSide = (coinReg === "bear" && acc.position.side === "Long") ||
-                          (coinReg === "bull" && acc.position.side === "Short");
+        const wrongSide = (coinReg === "bear" && p.side === "Long") ||
+                          (coinReg === "bull" && p.side === "Short");
         if (wrongSide) {
-          closeFullPosition(acc, acc.position, s.price, `Regime flipped to ${coinReg}`, Date.now(), engine);
+          p.regimeMismatchCount = (p.regimeMismatchCount || 0) + 1;
+        } else {
+          p.regimeMismatchCount = 0;
+        }
+        if (p.regimeMismatchCount >= 2) {
+          closeFullPosition(acc, p, s.price, `Regime flipped to ${coinReg} (confirmed)`, Date.now(), engine);
           flipClosed++;
         }
       });
     });
-    if (flipClosed) logEngineEvent(`Regime check closed ${flipClosed} position(s) now fighting their coin's own trend.`);
+    if (flipClosed) logEngineEvent(`Regime check closed ${flipClosed} position(s) now fighting their coin's own trend (confirmed over 2 checks).`);
   }
 
   // 1b. Per-position early-exit trip-wire — independent of the portfolio-level
