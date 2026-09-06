@@ -152,7 +152,7 @@
     <div>
       <h1>Trading Monitor</h1>
       <div class="sub">Each strategy trades independently with its own $ per coin · live prices · no real money</div>
-      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v27 · 2026-09-06 04:31 BST (regime-flip confirmation — requires 2 consecutive checks before closing)</div>
+      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v28 · 2026-09-06 17:04 BST (counter-check system, timestamp fix, hard vetoes, evidence-based re-entry)</div>
     </div>
     <button id="refreshBtn">Refresh</button>
   </div>
@@ -263,6 +263,10 @@
     <div class="section-title">Engine events</div>
     <div class="event-log" id="eventLog"></div>
 
+    <div class="section-title">Decision log — why trades get rejected, not just which ones open</div>
+    <div class="sub" style="margin-top:-4px;">Counter-check system: every hard veto is counted here, broken down by which strategy and coin it's blocking. If a check is firing constantly on one coin, that's worth reviewing — it might mean the check is right, or it might mean it's too strict for that coin.</div>
+    <div id="vetoSummaryPanel"></div>
+
     <div class="section-title" style="margin-top:16px;" id="sec-positions">Currently open positions</div>
     <div class="table-scroll"><div class="table-inner" id="openPosTable"></div></div>
 
@@ -327,7 +331,7 @@
   <div class="grid" id="cardGrid"></div>
 
   <div class="footnote" style="text-align:center;">
-    <span style="font-family:monospace; color:#4a5568; font-size:11px;">Build v27</span> · Full version history moved to the Excel research register — this footer no longer duplicates it.<br/>
+    <span style="font-family:monospace; color:#4a5568; font-size:11px;">Build v28</span> · Full version history moved to the Excel research register — this footer no longer duplicates it.<br/>
     Assumption recorded: £/$ treated as 1:1 since prices come from USDT pairs — no live FX conversion applied. Fees assumed at 0.1% per side, no funding cost modeled. Each strategy's pot per coin is fully isolated — a loss in one never affects another. Data saved only in this browser.
   </div>
 </div>
@@ -337,7 +341,7 @@
 // can actually work on them). More coins = more signals = a usable sample size
 // sooner. The exposure cap keeps total risk in check, so a wider list gives the
 // system more to choose from rather than more to pile into.
-const BUILD_TAG = "v27 · 2026-09-06 04:31 BST (regime-flip confirmation)";
+const BUILD_TAG = "v28 · 2026-09-06 17:04 BST (counter-check system + 4 targeted fixes)";
 
 const DEFAULT_COINS = [
   "BTC", "ETH", "SOL", "BNB", "ADA", "XRP", "DOGE", "AVAX",
@@ -856,8 +860,8 @@ function runEngineStep() {
           const hitStop = isLong ? lo <= p.stop : hi >= p.stop;
           const hitTarget = isLong ? hi >= p.target : lo <= p.target;
 
-          if (hitStop) { closeFullPosition(acc, p, p.stop, "Stop-loss hit", candleTime, engine); break; }
-          if (hitTarget) { closeFullPosition(acc, p, p.target, "TP3 hit", candleTime, engine); break; }
+          if (hitStop) { closeFullPosition(acc, p, p.stop, "Stop-loss hit", Math.max(candleTime, p.openedAt), engine); break; }
+          if (hitTarget) { closeFullPosition(acc, p, p.target, "TP3 hit", Math.max(candleTime, p.openedAt), engine); break; }
         }
 
         // Max duration: if a trade hasn't resolved within the time limit, close it
@@ -888,6 +892,30 @@ function runEngineStep() {
         const cooldownMin = engine.cooldownMinutes !== undefined ? engine.cooldownMinutes : 45;
         if (cooldownMin > 0 && acc.cooldownUntil && acc.cooldownUntil[side] && Date.now() < acc.cooldownUntil[side]) {
           return;
+        }
+
+        // v28: Cooldown expiring is a TIMER, not evidence. Require the market
+        // condition to have genuinely changed since the last loss on this exact
+        // coin+strategy+direction — not just "enough time passed and the same
+        // signal fired again". If regime, MACD sign, and RSI band are all
+        // unchanged from the last loss, the thesis hasn't actually changed.
+        if (acc.lastClose && acc.lastClose[side] && acc.lastClose[side].result === "Loss" && acc.lastClose[side].snapshot) {
+          const hoursSinceLoss = (Date.now() - acc.lastClose[side].time) / 3600000;
+          if (hoursSinceLoss < 6) { // only checks recent losses, not ancient history
+            const prev = acc.lastClose[side].snapshot;
+            const curRegime = (bot.key !== "rsi" && bot.key !== "boll") ? coinRegime(s) : "exempt";
+            const curMacdSign = s.indicators.macd.hist > 0 ? "pos" : "neg";
+            const prevMacdSign = prev.macdHist > 0 ? "pos" : "neg";
+            const curRsiBand = s.indicators.rsi.value < 30 ? "low" : s.indicators.rsi.value > 70 ? "high" : "mid";
+            const prevRsiBand = prev.rsi < 30 ? "low" : prev.rsi > 70 ? "high" : "mid";
+            const regimeChanged = curRegime !== prev.regime;
+            const macdChanged = curMacdSign !== prevMacdSign;
+            const rsiChanged = curRsiBand !== prevRsiBand;
+            if (!regimeChanged && !macdChanged && !rsiChanged) {
+              recordVeto("reentry_unchanged", bot.key, coin, `Re-entry blocked: regime/MACD/RSI all unchanged since the loss ${hoursSinceLoss.toFixed(1)}h ago`);
+              return;
+            }
+          }
         }
 
         // Regime gate: don't fight the coin's own broader direction. Uses each
@@ -931,6 +959,25 @@ function runEngineStep() {
           }
         }
 
+        // v28 hard veto: RSI/Bollinger are exempt from the regime GATE (they're
+        // meant to trade counter-trend), but that's different from ignoring
+        // STRONG, ACCELERATING momentum in the opposite direction. Audit case:
+        // shorting on RSI-overbought while price is still accelerating up hard
+        // is fighting the move, not catching its exhaustion. Veto when the
+        // coin's own regime AND its fast rate-of-change both strongly favor
+        // the side you'd be betting against — a real contradiction, not just
+        // "reached an extreme".
+        if (bot.key === "rsi" || bot.key === "boll") {
+          const coinReg = coinRegime(s);
+          const roc = fastROC(s.closes);
+          const fightingStrongUp = side === "Short" && coinReg === "bull" && roc !== null && roc >= 2.5;
+          const fightingStrongDown = side === "Long" && coinReg === "bear" && roc !== null && roc <= -2.5;
+          if (fightingStrongUp || fightingStrongDown) {
+            recordVeto("severe_contradiction", bot.key, coin, `${side} vetoed: regime is ${coinReg} AND price still accelerating (${roc.toFixed(1)}% 1h) the same direction — fighting the move, not catching exhaustion`);
+            return;
+          }
+        }
+
         const entry = s.price;
         // ATR-based stop (Turtle "2N"): stop distance scales with each coin's own
         // volatility instead of a fixed percentage. A calm coin gets a tight stop,
@@ -965,14 +1012,18 @@ function runEngineStep() {
         const minProfit = engine.minProfit !== undefined ? engine.minProfit : 15;
         if (expectedNet < minProfit) return;
 
-        // Reachability check: is TP3 a move this coin actually makes?
-        // Compare the required distance against the coin's own average daily
-        // range. A 21% target on a coin that typically moves 6% a day will
-        // never be hit — the trade just sits open tying up capital until the
-        // stop eventually catches it.
+        // Reachability check: is TP3 a move this coin actually makes? Compare
+        // the required distance against the coin's own average daily range.
+        // v28: tightened from 1.5x to 1.2x, and now LOGGED — this check
+        // already existed but fired silently, so its actual impact was
+        // invisible. Now you can see exactly how often it's rejecting a trade
+        // and on which coins.
         const tp3MovePct = stopDistPct * 2.5;
         const avgDailyRangePct = s.avgDailyRangePct;
-        if (avgDailyRangePct && tp3MovePct > avgDailyRangePct * 1.5) return;
+        if (avgDailyRangePct && tp3MovePct > avgDailyRangePct * 1.2) {
+          recordVeto("target_infeasible", bot.key, coin, `Target needs a ${(tp3MovePct*100).toFixed(1)}% move but ${coin} typically ranges ${(avgDailyRangePct*100).toFixed(1)}%/day`);
+          return;
+        }
 
         const rr = 2.5;
         // Record the scanner's score for this coin/direction at the moment of entry,
@@ -1034,6 +1085,39 @@ function logEngineEvent(msg) {
   engineEvents = engineEvents.slice(0, 30);
   localStorage.setItem("tm2_events", JSON.stringify(engineEvents));
 }
+
+// v28: Counter-check system. Every hard veto increments a structured counter
+// (not just a scrolling log) so you can actually SEE which check is firing,
+// how often, on which coin/strategy, and decide whether it needs tuning —
+// rather than only seeing the trades that got through.
+let vetoLog = JSON.parse(localStorage.getItem("tm2_vetoes") || "[]");
+function recordVeto(vetoType, bot, coin, reason) {
+  // Throttle per type+bot+coin so 30-second refreshes hitting the SAME
+  // still-blocked candidate don't inflate the count — this should reflect
+  // genuinely distinct rejection events, not repeated re-checks of one.
+  const key = `${vetoType}_${bot}_${coin}`;
+  if (engine) {
+    if (!engine.lastVetoLog) engine.lastVetoLog = {};
+    const last = engine.lastVetoLog[key] || 0;
+    if (Date.now() - last < 10 * 60000) return; // 10 min throttle per distinct block
+    engine.lastVetoLog[key] = Date.now();
+  }
+  vetoLog.unshift({ t: Date.now(), type: vetoType, bot, coin, reason });
+  vetoLog = vetoLog.slice(0, 500); // keep enough history for the report, cap growth
+  localStorage.setItem("tm2_vetoes", JSON.stringify(vetoLog));
+}
+function vetoSummary() {
+  const counts = {};
+  vetoLog.forEach(v => {
+    const key = v.type;
+    if (!counts[key]) counts[key] = { n: 0, byBot: {}, byCoin: {} };
+    counts[key].n++;
+    counts[key].byBot[v.bot] = (counts[key].byBot[v.bot] || 0) + 1;
+    counts[key].byCoin[v.coin] = (counts[key].byCoin[v.coin] || 0) + 1;
+  });
+  return counts;
+}
+
 function closeFullPosition(acc, p, exitPrice, exitReason, exitTime, engine) {
   const movePct = p.side === "Long" ? (exitPrice - p.entry) / p.entry : (p.entry - exitPrice) / p.entry;
   const grossPnl = movePct * p.notional;
@@ -1081,7 +1165,7 @@ function closeFullPosition(acc, p, exitPrice, exitReason, exitTime, engine) {
   // choosing to open again on a coin that recently closed — transparency for
   // review, not a trading decision. Recorded regardless of win/loss.
   if (!acc.lastClose) acc.lastClose = {};
-  acc.lastClose[p.side] = { reason: exitReason, time: exitTime || Date.now(), price: exitPrice, result: netPnl >= 0 ? "Win" : "Loss" };
+  acc.lastClose[p.side] = { reason: exitReason, time: exitTime || Date.now(), price: exitPrice, result: netPnl >= 0 ? "Win" : "Loss", snapshot: p.entrySnapshot || null };
   acc.position = null;
 }
 
@@ -1175,6 +1259,28 @@ function renderEngine() {
       : `<div style="color:#566078;">No regime flips or circuit-breaker events yet.</div>`;
   }
 
+  // Decision log / veto counter panel
+  const vetoEl = document.getElementById("vetoSummaryPanel");
+  if (vetoEl) {
+    const summary = vetoSummary();
+    const vetoLabels = {
+      severe_contradiction: "Severe contradiction (RSI/Bollinger fighting strong momentum)",
+      target_infeasible: "Target infeasible (needs a move this coin doesn't typically make)",
+      reentry_unchanged: "Re-entry blocked (evidence unchanged since last loss)",
+    };
+    const keys = Object.keys(summary);
+    if (!keys.length) {
+      vetoEl.innerHTML = `<div class="event-log" style="color:#566078;">No vetoes fired yet.</div>`;
+    } else {
+      vetoEl.innerHTML = `<div class="event-log">${keys.map(k => {
+        const d = summary[k];
+        const topCoins = Object.entries(d.byCoin).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([c,n])=>`${c} (${n})`).join(", ");
+        const topBots = Object.entries(d.byBot).sort((a,b)=>b[1]-a[1]).map(([b,n])=>`${BOTS.find(x=>x.key===b)?.label || b}: ${n}`).join(", ");
+        return `<div style="padding:6px 0; border-bottom:1px solid rgba(38,48,73,0.6);"><b style="color:#e0ac4c;">${vetoLabels[k] || k}</b> — fired ${d.n} times<br/><span style="color:#7c879c; font-size:10.5px;">By strategy: ${topBots} · Most on: ${topCoins}</span></div>`;
+      }).join("")}</div>`;
+    }
+  }
+
   // --- Currently open positions ---
   let openRows = [];
   let totalUnrealized = 0;
@@ -1258,6 +1364,19 @@ function generateReport() {
   let out = "";
   out += `STRATEGY COMPARISON REPORT\nGenerated: ${new Date().toLocaleString()}\nRunning since: ${new Date(engine.startedAt).toLocaleString()}\nBuild: ${BUILD_TAG}\n`;
   out += `Assumption: $ per coin per strategy = $${engine.perCoinCapital}, treated 1:1 with £. Leverage ${engine.leverage}x. Fees 0.1% per side, no funding modeled.\n\n`;
+
+  out += `=== DECISION LOG (why trades were rejected, v28) ===\n`;
+  const vSummary = vetoSummary();
+  const vLabels = { severe_contradiction: "Severe contradiction (RSI/Bollinger fighting strong momentum)", target_infeasible: "Target infeasible (move needed exceeds typical daily range)", reentry_unchanged: "Re-entry blocked (evidence unchanged since last loss)" };
+  const vKeys = Object.keys(vSummary);
+  if (!vKeys.length) out += "No vetoes fired this run.\n";
+  vKeys.forEach(k => {
+    const d = vSummary[k];
+    const byBot = Object.entries(d.byBot).map(([b,n]) => `${BOTS.find(x=>x.key===b)?.label || b}: ${n}`).join(", ");
+    const byCoin = Object.entries(d.byCoin).sort((a,b)=>b[1]-a[1]).map(([c,n])=>`${c} (${n})`).join(", ");
+    out += `${vLabels[k] || k}: ${d.n} times | By strategy: ${byBot} | By coin: ${byCoin}\n`;
+  });
+  out += `\n`;
 
   out += `=== STRATEGY TOTALS (all coins combined) ===\n`;
   const totals = activeBots.map(b => {
