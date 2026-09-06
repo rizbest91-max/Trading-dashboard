@@ -152,7 +152,7 @@
     <div>
       <h1>Trading Monitor</h1>
       <div class="sub">Each strategy trades independently with its own $ per coin · live prices · no real money</div>
-      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v28 · 2026-09-06 17:04 BST (counter-check system, timestamp fix, hard vetoes, evidence-based re-entry)</div>
+      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v29 · 2026-09-06 17:59 BST (RSI/Bollinger earn permission, trend late-entry protection, regime stability, correlated exposure, S/R target ceiling)</div>
     </div>
     <button id="refreshBtn">Refresh</button>
   </div>
@@ -331,7 +331,7 @@
   <div class="grid" id="cardGrid"></div>
 
   <div class="footnote" style="text-align:center;">
-    <span style="font-family:monospace; color:#4a5568; font-size:11px;">Build v28</span> · Full version history moved to the Excel research register — this footer no longer duplicates it.<br/>
+    <span style="font-family:monospace; color:#4a5568; font-size:11px;">Build v29</span> · Full version history moved to the Excel research register — this footer no longer duplicates it.<br/>
     Assumption recorded: £/$ treated as 1:1 since prices come from USDT pairs — no live FX conversion applied. Fees assumed at 0.1% per side, no funding cost modeled. Each strategy's pot per coin is fully isolated — a loss in one never affects another. Data saved only in this browser.
   </div>
 </div>
@@ -341,7 +341,7 @@
 // can actually work on them). More coins = more signals = a usable sample size
 // sooner. The exposure cap keeps total risk in check, so a wider list gives the
 // system more to choose from rather than more to pile into.
-const BUILD_TAG = "v28 · 2026-09-06 17:04 BST (counter-check system + 4 targeted fixes)";
+const BUILD_TAG = "v29 · 2026-09-06 17:59 BST (earn-permission, late-entry protection, regime stability, S/R ceiling)";
 
 const DEFAULT_COINS = [
   "BTC", "ETH", "SOL", "BNB", "ADA", "XRP", "DOGE", "AVAX",
@@ -388,10 +388,18 @@ function computeMACD(c) {
   const e12 = ema(c, 12), e26 = ema(c, 26);
   const line = c.map((_, i) => (e12[i] !== null && e26[i] !== null) ? e12[i] - e26[i] : null);
   const valid = line.filter(v => v !== null);
-  if (valid.length < 9) return { hist: null };
+  if (valid.length < 9) return { hist: null, histPrev: null };
   const sig = ema(valid, 9);
   const macd = valid[valid.length - 1], signal = sig[sig.length - 1];
-  return { hist: (macd !== null && signal !== null) ? macd - signal : null };
+  const hist = (macd !== null && signal !== null) ? macd - signal : null;
+  // histPrev: histogram ~3 candles (45min) ago, for slope/acceleration checks —
+  // was strengthening or fading, not just its current sign.
+  const backIdx = valid.length - 4;
+  let histPrev = null;
+  if (backIdx >= 0 && sig[backIdx] !== undefined && sig[backIdx] !== null) {
+    histPrev = valid[backIdx] - sig[backIdx];
+  }
+  return { hist, histPrev };
 }
 function computeBollinger(c, p = 20, m = 2) {
   if (c.length < p) return null;
@@ -694,6 +702,52 @@ function runEngineStep() {
     return slow;
   }
 
+  // v29: Regime stability requirement for NEW ENTRIES. v27 already required
+  // 2 consecutive checks before CLOSING a position on a regime flip — but
+  // nothing stopped a trend bot from OPENING on a regime reading that itself
+  // was about to flip back. "Regime changed" is not the same as "regime
+  // confirmed". Computed once per coin per tick (not per bot) so the
+  // consecutive-count is accurate rather than inflated by being called once
+  // per active strategy.
+  if (!engine.regimeStability) engine.regimeStability = {};
+  function stableCoinRegime(coin, s) {
+    const reading = coinRegime(s);
+    const prev = engine.regimeStability[coin];
+    if (prev && prev.value === reading) prev.count = (prev.count || 1) + 1;
+    else engine.regimeStability[coin] = { value: reading, count: 1 };
+    // Unconfirmed readings are treated as "mixed" (no new trend entries) —
+    // same safe default already used for genuinely indecisive regimes.
+    return engine.regimeStability[coin].count >= 2 ? reading : "mixed";
+  }
+  const stableRegimeByCoin = {};
+  coinList.forEach(c2 => { if (state[c2]) stableRegimeByCoin[c2] = stableCoinRegime(c2, state[c2]); });
+
+  // v29: RSI/Bollinger "earn permission" instead of a blanket regime exemption.
+  // Oversold doesn't automatically mean buy — in a strong trend, RSI can stay
+  // extreme a long time. Requires genuine reversal evidence, stacked:
+  //   1. Confirmed range state (slow trend averages close together, not a
+  //      strongly established one-way trend)
+  //   2. Exhaustion — momentum in the direction being faded must be WEAKENING,
+  //      not just "reached an extreme"
+  //   3. Genuine proximity to real support/resistance, not just an RSI number
+  //   4. Volume consistent with a real reversal (not a quiet drift to an extreme)
+  // A 5th requirement (multi-check persistence) is applied where this is used.
+  function checkMeanReversionPermission(s, side) {
+    if (s.sma96 && s.sma192 && s.price) {
+      const spread = Math.abs(s.sma96 - s.sma192) / s.price;
+      if (spread >= 0.02) return { allowed: false, reason: "Not a confirmed range — slow trend averages are diverging strongly (established trend, not a range)" };
+    }
+    const hist = s.indicators.macd.hist, histPrev = s.indicators.macd.histPrev;
+    if (hist === null || histPrev === null) return { allowed: false, reason: "Insufficient MACD history to confirm exhaustion" };
+    const exhaustion = side === "Long" ? (hist > histPrev) : (hist < histPrev);
+    if (!exhaustion) return { allowed: false, reason: "No sign of exhaustion — momentum in the recent direction hasn't started fading yet" };
+    if (s.positionInRange === undefined) return { allowed: false, reason: "No range-position data available" };
+    const nearStructure = side === "Long" ? s.positionInRange < 0.15 : s.positionInRange > 0.85;
+    if (!nearStructure) return { allowed: false, reason: `Not close enough to real support/resistance (at ${(s.positionInRange*100).toFixed(0)}% of its range)` };
+    if (s.volRatio === undefined || s.volRatio === null || s.volRatio < 1.0) return { allowed: false, reason: `Volume too thin for a credible reversal (${s.volRatio != null ? s.volRatio.toFixed(2) : "?"}x average)` };
+    return { allowed: true, reason: "Range state, exhaustion, structural proximity, and volume all support a genuine reversal setup" };
+  }
+
   // BTC regime kept only for the dashboard summary box (informational) — actual
   // trade gating below uses each coin's own regime instead.
   const btc = state["BTC"] || wideState["BTC"];
@@ -922,11 +976,35 @@ function runEngineStep() {
         // coin's own regime now (not one BTC signal for everything). RSI and
         // Bollinger are exempt — they're built to trade AGAINST short-term
         // direction, so a trend filter would defeat their purpose.
+        // v29: uses the STABILITY-CONFIRMED regime (held for 2 consecutive
+        // checks), not the instant reading — "regime changed" isn't the same
+        // as "regime confirmed", and entering on a reading that flips back
+        // 30 seconds later wastes a real trade and a real fee.
         if (engine.useRegimeFilter !== false && bot.key !== "rsi" && bot.key !== "boll") {
-          const coinReg = coinRegime(s);
+          const coinReg = stableRegimeByCoin[coin] || "mixed";
           if (coinReg === "bull" && side !== "Long") return;
           if (coinReg === "bear" && side !== "Short") return;
           if (coinReg === "mixed") return;
+        }
+
+        // v29: RSI/Bollinger no longer get a free pass — they must earn
+        // permission via checkMeanReversionPermission above, AND that
+        // permission must hold for 2 consecutive checks (~30-60s) before
+        // entering, same "one reading isn't enough" principle used elsewhere.
+        if (bot.key === "rsi" || bot.key === "boll") {
+          const permission = checkMeanReversionPermission(s, side);
+          const confirmKey = `${bot.key}_${coin}_${side}`;
+          if (!engine.reversalConfirm) engine.reversalConfirm = {};
+          if (!permission.allowed) {
+            engine.reversalConfirm[confirmKey] = 0;
+            recordVeto("reversal_unconfirmed", bot.key, coin, permission.reason);
+            return;
+          }
+          engine.reversalConfirm[confirmKey] = (engine.reversalConfirm[confirmKey] || 0) + 1;
+          if (engine.reversalConfirm[confirmKey] < 2) {
+            recordVeto("reversal_unconfirmed", bot.key, coin, "Reversal setup looks valid — needs to hold for one more check before entering (multi-candle confirmation)");
+            return;
+          }
         }
 
         // Volume confirmation filter: skip entries where the move isn't backed
@@ -978,6 +1056,59 @@ function runEngineStep() {
           }
         }
 
+        // v29 hard veto, trend bots (SMA/MACD/Donchian) only: check against ONE
+        // specific, relevant contradiction — MACD momentum fading or reversing
+        // hard against the proposed direction — rather than requiring every
+        // indicator to agree. Deliberately narrow: this is a strategy-relevant
+        // sanity check, not a universal consensus rule, so each strategy can
+        // still behave differently and the comparison stays meaningful.
+        if (["sma", "macd", "donchian"].includes(bot.key)) {
+          const hist = s.indicators.macd.hist, histPrev = s.indicators.macd.histPrev;
+          if (hist !== null && histPrev !== null) {
+            const momentumStronglyAgainstLong = side === "Long" && hist < 0 && hist < histPrev; // negative AND getting more negative
+            const momentumStronglyAgainstShort = side === "Short" && hist > 0 && hist > histPrev; // positive AND getting more positive
+            if (momentumStronglyAgainstLong || momentumStronglyAgainstShort) {
+              recordVeto("severe_contradiction", bot.key, coin, `${side} vetoed: MACD momentum is both against the trade and accelerating (hist ${hist.toFixed(3)} vs ${histPrev.toFixed(3)} ~45min ago)`);
+              return;
+            }
+          }
+        }
+
+        // v29: trend late-entry/chasing protection. A correct direction with
+        // a bad entry (most of the move already used up) is still a bad
+        // trade. If price is already sitting near the top of its recent
+        // range on a Long (or bottom on a Short), there's little room left
+        // and the entry is likely chasing a move that's mostly over.
+        // Donchian is deliberately excluded — its entire thesis IS price
+        // breaking the recent range extreme, so this condition is its valid
+        // signal, not chasing. Applying this check there would veto every
+        // genuine Donchian entry.
+        if (["sma", "macd"].includes(bot.key) && s.positionInRange !== undefined) {
+          const chasingLong = side === "Long" && s.positionInRange > 0.80;
+          const chasingShort = side === "Short" && s.positionInRange < 0.20;
+          if (chasingLong || chasingShort) {
+            recordVeto("late_entry", bot.key, coin, `${side} vetoed: price already ${(s.positionInRange*100).toFixed(0)}% up its recent range — little room left, likely chasing an extended move`);
+            return;
+          }
+        }
+
+        // v29: momentum slope requirement (SMA/MACD only — Donchian's thesis is
+        // price structure, not momentum, so leaving it untouched keeps that
+        // comparison meaningful). Sign alone isn't enough — require the
+        // histogram to actually be strengthening in the trade's favor, not
+        // just barely positive/negative while fading.
+        if (["sma", "macd"].includes(bot.key)) {
+          const hist = s.indicators.macd.hist, histPrev = s.indicators.macd.histPrev;
+          if (hist !== null && histPrev !== null) {
+            const weakeningLong = side === "Long" && hist <= histPrev;
+            const weakeningShort = side === "Short" && hist >= histPrev;
+            if (weakeningLong || weakeningShort) {
+              recordVeto("weak_momentum", bot.key, coin, `${side} vetoed: MACD sign supports the trade but momentum is fading, not strengthening (hist ${hist.toFixed(3)} vs ${histPrev.toFixed(3)} ~45min ago)`);
+              return;
+            }
+          }
+        }
+
         const entry = s.price;
         // ATR-based stop (Turtle "2N"): stop distance scales with each coin's own
         // volatility instead of a fixed percentage. A calm coin gets a tight stop,
@@ -993,8 +1124,31 @@ function runEngineStep() {
         const stopDistPct = Math.abs(entry - stop) / entry;
         if (stopDistPct < 0.012) return; // require at least ~1.2% room to the stop
 
-        // Single target only: TP3 at 2.5x the stop distance. One exit, one fee pair.
-        const target = side === "Long" ? entry * (1 + stopDistPct * 2.5) : entry * (1 - stopDistPct * 2.5);
+        // Base target: 2.5x the stop distance.
+        let target = side === "Long" ? entry * (1 + stopDistPct * 2.5) : entry * (1 - stopDistPct * 2.5);
+
+        // v29: support/resistance ceiling on targets. A target manufactured
+        // purely from a fixed R:R multiple can sit beyond real resistance/
+        // support with no evidence price can actually get there. Cap it at
+        // that boundary. Donchian is exempt — its entire thesis IS price
+        // breaking beyond exactly that boundary, so capping it there would
+        // make the strategy untestable.
+        if (bot.key !== "donchian") {
+          const structuralCeiling = side === "Long" ? s.sellZoneHigh : s.buyZoneLow;
+          if (structuralCeiling !== undefined && structuralCeiling !== null) {
+            const beyondCeiling = side === "Long" ? target > structuralCeiling : target < structuralCeiling;
+            if (beyondCeiling) target = structuralCeiling;
+          }
+        }
+        // Everything downstream uses the REAL distance to this (possibly
+        // capped) target, not the original fixed 2.5x assumption.
+        const actualTargetDistPct = Math.abs(target - entry) / entry;
+        if (actualTargetDistPct < stopDistPct * 0.8) {
+          // Capping to real structure left too little reward to justify the
+          // risk — reject rather than take a trade with poor real economics.
+          recordVeto("target_capped", bot.key, coin, `After capping to real structure, reward (${(actualTargetDistPct*100).toFixed(2)}%) no longer justifies the risk (${(stopDistPct*100).toFixed(2)}%)`);
+          return;
+        }
 
         const notionalFromLeverage = acc.cash * engine.leverage;
         const riskCapFraction = 0.20; // never risk more than 20% of this pot on one trade
@@ -1003,29 +1157,25 @@ function runEngineStep() {
         const margin = notional / engine.leverage;
         if (margin <= 0) return;
 
-        // Minimum-profit filter: if hitting TP3 wouldn't clear a worthwhile
+        // Minimum-profit filter: if hitting target wouldn't clear a worthwhile
         // amount after fees, the setup isn't worth the risk — skip it.
-        // A $2-5 payoff doesn't justify risking the stop-loss.
-        const expectedGross = stopDistPct * 2.5 * notional;
+        const expectedGross = actualTargetDistPct * notional;
         const expectedFees = notional * engine.feePct * 2;
         const expectedNet = expectedGross - expectedFees;
         const minProfit = engine.minProfit !== undefined ? engine.minProfit : 15;
         if (expectedNet < minProfit) return;
 
-        // Reachability check: is TP3 a move this coin actually makes? Compare
-        // the required distance against the coin's own average daily range.
-        // v28: tightened from 1.5x to 1.2x, and now LOGGED — this check
-        // already existed but fired silently, so its actual impact was
-        // invisible. Now you can see exactly how often it's rejecting a trade
-        // and on which coins.
-        const tp3MovePct = stopDistPct * 2.5;
+        // Reachability check: is the target a move this coin actually makes?
+        // Compare the required distance against the coin's own average daily
+        // range. v28: tightened from 1.5x to 1.2x, and now LOGGED.
+        const tp3MovePct = actualTargetDistPct;
         const avgDailyRangePct = s.avgDailyRangePct;
         if (avgDailyRangePct && tp3MovePct > avgDailyRangePct * 1.2) {
           recordVeto("target_infeasible", bot.key, coin, `Target needs a ${(tp3MovePct*100).toFixed(1)}% move but ${coin} typically ranges ${(avgDailyRangePct*100).toFixed(1)}%/day`);
           return;
         }
 
-        const rr = 2.5;
+        const rr = actualTargetDistPct / stopDistPct; // real R:R, reflects any S/R capping above
         // Record the scanner's score for this coin/direction at the moment of entry,
         // so we can later check whether high-score entries actually perform better.
         let entryScore = null;
@@ -1039,6 +1189,19 @@ function runEngineStep() {
           const a2 = engine.bots[b2.key] && engine.bots[b2.key].coins[c2];
           if (a2 && a2.position) { concurrentOpen++; if (a2.position.side === "Long") concurrentLong++; else concurrentShort++; }
         }); });
+
+        // v29: correlated-exposure clustering — MEASUREMENT ONLY, does not
+        // block or merge anything. If SMA+MACD+Donchian all open the same
+        // coin+direction around the same time, that's arguably one market
+        // thesis represented four times, not four independent bets. Strategies
+        // stay fully independent; this just makes the pattern visible in the
+        // report so it can inform review without touching capital allocation.
+        let sameCoinSameSideOtherBots = [];
+        BOTS.forEach(b2 => {
+          if (b2.key === bot.key || !toggles[b2.key]) return;
+          const a2 = engine.bots[b2.key] && engine.bots[b2.key].coins[coin];
+          if (a2 && a2.position && a2.position.side === side) sameCoinSameSideOtherBots.push(b2.label);
+        });
 
         // Snapshot of key indicator values at entry — lets a later review tell
         // "strategy was right but got unlucky" apart from "signal itself was weak".
@@ -1065,11 +1228,14 @@ function runEngineStep() {
         }
 
         acc.cash -= margin;
+        if (bot.key === "rsi" || bot.key === "boll") {
+          if (engine.reversalConfirm) engine.reversalConfirm[`${bot.key}_${coin}_${side}`] = 0;
+        }
         acc.position = {
           coin, bot: bot.key, side, entry, stop, target, entryScore,
           leverage: engine.leverage, margin, notional, expectedNet,
           riskReward: rr, reason: reasonText, openedAt: Date.now(),
-          concurrentOpen, concurrentLong, concurrentShort, entrySnapshot,
+          concurrentOpen, concurrentLong, concurrentShort, entrySnapshot, sameCoinSameSideOtherBots,
           maePct: 0, mfePct: 0, // running worst/best excursion, updated on every exit-check scan
         };
       }
@@ -1144,6 +1310,7 @@ function closeFullPosition(acc, p, exitPrice, exitReason, exitTime, engine) {
     grossPnl, fees, netPnl, balanceAfter: acc.cash, result: netPnl >= 0 ? "Win" : "Loss",
     openedAt: p.openedAt, durationHrs, maePct: finalMae, mfePct: finalMfe,
     concurrentOpen: p.concurrentOpen, concurrentLong: p.concurrentLong, concurrentShort: p.concurrentShort,
+    sameCoinSameSideOtherBots: p.sameCoinSameSideOtherBots || [],
     entrySnapshot: p.entrySnapshot,
   });
   // Re-entry cooldown: block this exact coin+strategy+direction for a while
@@ -1264,9 +1431,13 @@ function renderEngine() {
   if (vetoEl) {
     const summary = vetoSummary();
     const vetoLabels = {
-      severe_contradiction: "Severe contradiction (RSI/Bollinger fighting strong momentum)",
+      severe_contradiction: "Severe contradiction (fighting strong opposing momentum)",
       target_infeasible: "Target infeasible (needs a move this coin doesn't typically make)",
       reentry_unchanged: "Re-entry blocked (evidence unchanged since last loss)",
+      late_entry: "Late entry (chasing an already-extended move)",
+      weak_momentum: "Weak momentum (sign supports trade but strength is fading)",
+      target_capped: "Target capped or rejected at real support/resistance",
+      reversal_unconfirmed: "RSI/Bollinger reversal not yet earned",
     };
     const keys = Object.keys(summary);
     if (!keys.length) {
@@ -1365,9 +1536,17 @@ function generateReport() {
   out += `STRATEGY COMPARISON REPORT\nGenerated: ${new Date().toLocaleString()}\nRunning since: ${new Date(engine.startedAt).toLocaleString()}\nBuild: ${BUILD_TAG}\n`;
   out += `Assumption: $ per coin per strategy = $${engine.perCoinCapital}, treated 1:1 with £. Leverage ${engine.leverage}x. Fees 0.1% per side, no funding modeled.\n\n`;
 
-  out += `=== DECISION LOG (why trades were rejected, v28) ===\n`;
+  out += `=== DECISION LOG (why trades were rejected, v28/v29) ===\n`;
   const vSummary = vetoSummary();
-  const vLabels = { severe_contradiction: "Severe contradiction (RSI/Bollinger fighting strong momentum)", target_infeasible: "Target infeasible (move needed exceeds typical daily range)", reentry_unchanged: "Re-entry blocked (evidence unchanged since last loss)" };
+  const vLabels = {
+    severe_contradiction: "Severe contradiction (fighting strong opposing momentum)",
+    target_infeasible: "Target infeasible (move needed exceeds typical daily range)",
+    reentry_unchanged: "Re-entry blocked (evidence unchanged since last loss)",
+    late_entry: "Late entry (chasing an already-extended move)",
+    weak_momentum: "Weak momentum (sign supports trade but strength is fading)",
+    target_capped: "Target capped or rejected at real support/resistance",
+    reversal_unconfirmed: "RSI/Bollinger reversal not yet earned (range/exhaustion/structure/volume/confirmation)",
+  };
   const vKeys = Object.keys(vSummary);
   if (!vKeys.length) out += "No vetoes fired this run.\n";
   vKeys.forEach(k => {
@@ -1377,6 +1556,20 @@ function generateReport() {
     out += `${vLabels[k] || k}: ${d.n} times | By strategy: ${byBot} | By coin: ${byCoin}\n`;
   });
   out += `\n`;
+
+  out += `=== CORRELATED EXPOSURE (measurement only — strategies remain fully independent) ===\n`;
+  let allTradesForCluster = [];
+  BOTS.forEach(b => { if (!toggles[b.key]) return; coinList.forEach(coin => {
+    const acc = engine.bots[b.key].coins[coin];
+    if (acc) allTradesForCluster = allTradesForCluster.concat(acc.trades);
+  }); });
+  const clustered = allTradesForCluster.filter(t => t.sameCoinSameSideOtherBots && t.sameCoinSameSideOtherBots.length > 0);
+  const isolated = allTradesForCluster.filter(t => !t.sameCoinSameSideOtherBots || t.sameCoinSameSideOtherBots.length === 0);
+  const netOf = arr => arr.reduce((a,t) => a + (t.netPnl||0), 0);
+  const winRateOf = arr => arr.length ? arr.filter(t=>t.result==="Win").length/arr.length*100 : 0;
+  out += `Trades sharing a coin+direction with another active strategy at entry: ${clustered.length} of ${allTradesForCluster.length} | win rate ${fmt(winRateOf(clustered),1)}% | net $${fmt(netOf(clustered))}\n`;
+  out += `Trades with no other strategy on the same coin+direction: ${isolated.length} of ${allTradesForCluster.length} | win rate ${fmt(winRateOf(isolated),1)}% | net $${fmt(netOf(isolated))}\n`;
+  out += `Interpretation: if clustered trades underperform isolated ones, several strategies may be repeatedly multiplying exposure to the same underlying market thesis rather than genuinely diversifying it.\n\n`;
 
   out += `=== STRATEGY TOTALS (all coins combined) ===\n`;
   const totals = activeBots.map(b => {
@@ -1455,7 +1648,8 @@ function generateReport() {
     const concStr = (t.concurrentOpen !== undefined) ? `${t.concurrentOpen} open (${t.concurrentLong}L/${t.concurrentShort}S)` : "n/a";
     const snap = t.entrySnapshot || {};
     const snapStr = `RSI ${snap.rsi != null ? snap.rsi.toFixed(1) : "n/a"}, MACD hist ${snap.macdHist != null ? snap.macdHist.toFixed(3) : "n/a"}, regime ${snap.regime || "n/a"}, ATR ${snap.atrPct != null ? (snap.atrPct*100).toFixed(2)+"%" : "n/a"}, vol ${snap.volRatio != null ? snap.volRatio.toFixed(2)+"x" : "n/a"}`;
-    out += `[${new Date(t.closedAt).toLocaleString()}] ${t.botLabel} | ${t.coin} ${t.side} | Entered: ${entryTimeStr} | Duration: ${durStr} | Reason for entry: ${t.reason || "n/a"} | Score at entry: ${t.entryScore == null ? "n/a" : t.entryScore} | Entry $${fmt(t.entry, pd)} Stop $${fmt(t.stop, pd)} Target $${fmt(t.target, pd)} | Lev ${t.leverage}x | R:R ${fmt(t.riskReward, 1)} | MAE ${maeStr} MFE ${mfeStr} | Concurrent: ${concStr} | Entry snapshot: ${snapStr} | Exit $${fmt(t.exitPrice, pd)} (${t.exitReason}) | Gross $${fmt(t.grossPnl)} Fees $${fmt(t.fees)} Net $${fmt(t.netPnl)} | Balance after $${fmt(t.balanceAfter)} | ${t.result}\n`;
+    const clusterStr = (t.sameCoinSameSideOtherBots && t.sameCoinSameSideOtherBots.length) ? `Also open on this coin+direction: ${t.sameCoinSameSideOtherBots.join(", ")}` : "No other strategy on this coin+direction";
+    out += `[${new Date(t.closedAt).toLocaleString()}] ${t.botLabel} | ${t.coin} ${t.side} | Entered: ${entryTimeStr} | Duration: ${durStr} | Reason for entry: ${t.reason || "n/a"} | Score at entry: ${t.entryScore == null ? "n/a" : t.entryScore} | Entry $${fmt(t.entry, pd)} Stop $${fmt(t.stop, pd)} Target $${fmt(t.target, pd)} | Lev ${t.leverage}x | R:R ${fmt(t.riskReward, 1)} | MAE ${maeStr} MFE ${mfeStr} | Concurrent: ${concStr} | Cluster: ${clusterStr} | Entry snapshot: ${snapStr} | Exit $${fmt(t.exitPrice, pd)} (${t.exitReason}) | Gross $${fmt(t.grossPnl)} Fees $${fmt(t.fees)} Net $${fmt(t.netPnl)} | Balance after $${fmt(t.balanceAfter)} | ${t.result}\n`;
   });
 
   return out;
@@ -1579,7 +1773,7 @@ async function analyzeCoin(ticker) {
     indicators: {
       sma: { signal: smaSignal, reading: smaSignal === "bull" ? "Short > Long" : smaSignal === "bear" ? "Short < Long" : "—" },
       rsi: { signal: rsiSignal, reading: rsiVal !== null ? rsiVal.toFixed(1) : "—", value: rsiVal },
-      macd: { signal: macdSignal, reading: macdRes.hist !== null ? macdRes.hist.toFixed(2) : "—", hist: macdRes.hist },
+      macd: { signal: macdSignal, reading: macdRes.hist !== null ? macdRes.hist.toFixed(2) : "—", hist: macdRes.hist, histPrev: macdRes.histPrev },
       boll: { signal: bollSignal, reading: boll ? "$" + fmt(price, decimalsFor(price)) : "—" },
       donchian: { signal: donchSignal, reading: donch ? (donchSignal === "bull" ? "Broke 20-high" : donchSignal === "bear" ? "Broke 20-low" : "Inside range") : "—" },
       // Funding + Momentum: funding rate is the only signal here NOT derived from
