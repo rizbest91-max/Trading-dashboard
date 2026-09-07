@@ -152,7 +152,7 @@
     <div>
       <h1>Trading Monitor</h1>
       <div class="sub">Each strategy trades independently with its own $ per coin · live prices · no real money</div>
-      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v30 · 2026-09-07 08:09 BST (shadow tracking + full per-instance decision/shadow log in reports, Reset now clears decision history)</div>
+      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v31 · 2026-09-07 23:55 BST (shadow tracking bug fix: throttled logging, continuation shadows protected from eviction)</div>
     </div>
     <button id="refreshBtn">Refresh</button>
   </div>
@@ -335,7 +335,7 @@
   <div class="grid" id="cardGrid"></div>
 
   <div class="footnote" style="text-align:center;">
-    <span style="font-family:monospace; color:#4a5568; font-size:11px;">Build v29</span> · Full version history moved to the Excel research register — this footer no longer duplicates it.<br/>
+    <span style="font-family:monospace; color:#4a5568; font-size:11px;">Build v31</span> · Full version history moved to the Excel research register — this footer no longer duplicates it.<br/>
     Assumption recorded: £/$ treated as 1:1 since prices come from USDT pairs — no live FX conversion applied. Fees assumed at 0.1% per side, no funding cost modeled. Each strategy's pot per coin is fully isolated — a loss in one never affects another. Data saved only in this browser.
   </div>
 </div>
@@ -345,7 +345,7 @@
 // can actually work on them). More coins = more signals = a usable sample size
 // sooner. The exposure cap keeps total risk in check, so a wider list gives the
 // system more to choose from rather than more to pile into.
-const BUILD_TAG = "v30 · 2026-09-07 08:09 BST (shadow tracking + full per-instance report logs)";
+const BUILD_TAG = "v31 · 2026-09-07 23:55 BST (shadow tracking bug fix — throttling + protected continuation storage)";
 
 const DEFAULT_COINS = [
   "BTC", "ETH", "SOL", "BNB", "ADA", "XRP", "DOGE", "AVAX",
@@ -667,6 +667,7 @@ function resetEngine() {
   // misleading now that the full report dumps individual records.
   vetoLog = []; localStorage.setItem("tm2_vetoes", "[]");
   shadowTrades = []; localStorage.setItem("tm2_shadow", "[]");
+  continuationShadows = []; localStorage.setItem("tm2_continuation", "[]");
   engineEvents = []; localStorage.setItem("tm2_events", "[]");
 }
 function ensureCoinInEngine(coin) {
@@ -975,7 +976,21 @@ function runEngineStep() {
         // Shared logger: call at every rejection point with the specific
         // veto type + reason. Records both the counter (existing v28 system)
         // and a trackable shadow position (new).
+        //
+        // v31 fix: throttled. Without this, a coin sitting under the same
+        // veto for 20 minutes straight logged ~40 near-identical entries (one
+        // per ~30s tick) — inflating counts and, worse, flooding the shared
+        // shadow-trade storage with duplicates of the same market outcome,
+        // which pushed out rarer continuation shadows entirely (found via a
+        // report showing exactly 500/2000 entries — the hard caps, meaning
+        // real data was being silently evicted).
         function blockCandidate(vetoType, reason) {
+          const key = `${vetoType}_${bot.key}_${coin}_${side}`;
+          if (!engine.lastBlockLog) engine.lastBlockLog = {};
+          const last = engine.lastBlockLog[key] || 0;
+          const BLOCK_THROTTLE_MS = 20 * 60000; // one log per genuinely new 20-min episode
+          if (Date.now() - last < BLOCK_THROTTLE_MS) return;
+          engine.lastBlockLog[key] = Date.now();
           recordVeto(vetoType, bot.key, coin, reason);
           addShadowTrade(bot.key, coin, side, hypEntry, hypStop, hypTarget, reason, vetoType);
         }
@@ -1307,18 +1322,12 @@ function logEngineEvent(msg) {
 // (not just a scrolling log) so you can actually SEE which check is firing,
 // how often, on which coin/strategy, and decide whether it needs tuning —
 // rather than only seeing the trades that got through.
+// v31: throttling moved to blockCandidate (its only caller), which now gates
+// BOTH this and addShadowTrade together — previously this had its own
+// 10-min throttle but addShadowTrade had none at all, so shadow trades kept
+// logging every ~30s regardless, which is what actually filled the array.
 let vetoLog = JSON.parse(localStorage.getItem("tm2_vetoes") || "[]");
 function recordVeto(vetoType, bot, coin, reason) {
-  // Throttle per type+bot+coin so 30-second refreshes hitting the SAME
-  // still-blocked candidate don't inflate the count — this should reflect
-  // genuinely distinct rejection events, not repeated re-checks of one.
-  const key = `${vetoType}_${bot}_${coin}`;
-  if (engine) {
-    if (!engine.lastVetoLog) engine.lastVetoLog = {};
-    const last = engine.lastVetoLog[key] || 0;
-    if (Date.now() - last < 10 * 60000) return; // 10 min throttle per distinct block
-    engine.lastVetoLog[key] = Date.now();
-  }
   vetoLog.unshift({ t: Date.now(), type: vetoType, bot, coin, reason });
   vetoLog = vetoLog.slice(0, 500); // keep enough history for the report, cap growth
   localStorage.setItem("tm2_vetoes", JSON.stringify(vetoLog));
@@ -1340,21 +1349,40 @@ function vetoSummary() {
 // tracked against real subsequent price data exactly like a live trade — so
 // blocked-vs-approved outcomes become directly, honestly comparable instead
 // of guessed at.
-let shadowTrades = JSON.parse(localStorage.getItem("tm2_shadow") || "[]");
+//
+// v31: split into TWO separate arrays with independent storage. Continuation
+// shadows (early-exit/regime-flip) are rare — maybe a dozen per session —
+// while blocked-entry shadows can be frequent even with throttling. Sharing
+// one capped array meant the frequent kind could evict the rare, valuable
+// kind entirely (confirmed: a report showed 11 of 12 regime-flip
+// continuations missing, evicted by blocked-entry volume before they had a
+// chance to resolve). Now structurally impossible.
+let shadowTrades = JSON.parse(localStorage.getItem("tm2_shadow") || "[]"); // blocked entries
+let continuationShadows = JSON.parse(localStorage.getItem("tm2_continuation") || "[]"); // early-exit/regime-flip
+
 function addShadowTrade(botKey, coin, side, entry, stop, target, reason, vetoType) {
   if (entry == null || stop == null || target == null) return; // incomplete plan (e.g. no ATR yet) — nothing to track
-  shadowTrades.unshift({
+  const record = {
     id: Date.now() + Math.random(), t: Date.now(), bot: botKey, coin, side,
     entry, stop, target, reason, vetoType,
     status: "pending", resolution: null, resolvedAt: null, resolvedPrice: null,
-  });
-  shadowTrades = shadowTrades.slice(0, 2000); // cap growth
-  localStorage.setItem("tm2_shadow", JSON.stringify(shadowTrades));
+  };
+  const isContinuation = vetoType === "early_exit_continuation" || vetoType === "regime_flip_continuation";
+  if (isContinuation) {
+    continuationShadows.unshift(record);
+    continuationShadows = continuationShadows.slice(0, 1000); // generous — these are rare, should never actually fill
+    localStorage.setItem("tm2_continuation", JSON.stringify(continuationShadows));
+  } else {
+    shadowTrades.unshift(record);
+    shadowTrades = shadowTrades.slice(0, 2000);
+    localStorage.setItem("tm2_shadow", JSON.stringify(shadowTrades));
+  }
 }
-function resolveShadowTrades() {
+
+function resolveShadowArray(arr) {
   const MAX_HOLD_MS = 24 * 3600000;
   let changed = false;
-  shadowTrades.forEach(st => {
+  arr.forEach(st => {
     if (st.status !== "pending") return;
     const s = state[st.coin] || wideState[st.coin];
     if (s && s.times && s.highs && s.lows) {
@@ -1375,14 +1403,19 @@ function resolveShadowTrades() {
       changed = true;
     }
   });
-  if (changed) localStorage.setItem("tm2_shadow", JSON.stringify(shadowTrades));
+  return changed;
+}
+function resolveShadowTrades() {
+  if (resolveShadowArray(shadowTrades)) localStorage.setItem("tm2_shadow", JSON.stringify(shadowTrades));
+  if (resolveShadowArray(continuationShadows)) localStorage.setItem("tm2_continuation", JSON.stringify(continuationShadows));
 }
 function shadowSummary() {
-  const resolved = shadowTrades.filter(st => st.status === "resolved");
+  const all = shadowTrades.concat(continuationShadows); // combined view for display only — storage stays separate
+  const resolved = all.filter(st => st.status === "resolved");
   const wins = resolved.filter(st => st.resolution === "would_win").length;
   const losses = resolved.filter(st => st.resolution === "would_lose").length;
   const timeouts = resolved.filter(st => st.resolution === "would_timeout").length;
-  const pending = shadowTrades.filter(st => st.status === "pending").length;
+  const pending = all.filter(st => st.status === "pending").length;
   const byType = {};
   resolved.forEach(st => {
     if (!byType[st.vetoType]) byType[st.vetoType] = { n: 0, wins: 0, losses: 0, timeouts: 0 };
@@ -1391,7 +1424,7 @@ function shadowSummary() {
     else if (st.resolution === "would_lose") byType[st.vetoType].losses++;
     else byType[st.vetoType].timeouts++;
   });
-  return { total: shadowTrades.length, resolved: resolved.length, wins, losses, timeouts, pending, byType };
+  return { total: all.length, resolved: resolved.length, wins, losses, timeouts, pending, byType };
 }
 
 function closeFullPosition(acc, p, exitPrice, exitReason, exitTime, engine) {
@@ -1763,7 +1796,7 @@ function generateReport() {
   // arrays directly, this filter is a second safety net).
   const runStart = engine.startedAt || 0;
   const runVetoes = vetoLog.filter(v => v.t >= runStart).sort((a,b) => a.t - b.t);
-  const runShadows = shadowTrades.filter(st => st.t >= runStart).sort((a,b) => a.t - b.t);
+  const runShadows = shadowTrades.concat(continuationShadows).filter(st => st.t >= runStart).sort((a,b) => a.t - b.t);
 
   out += `=== FULL DECISION LOG — every individual block, this run (${runVetoes.length} entries) ===\n`;
   if (!runVetoes.length) out += "None this run.\n";
