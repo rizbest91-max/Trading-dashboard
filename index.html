@@ -152,7 +152,7 @@
     <div>
       <h1>Trading Monitor</h1>
       <div class="sub">Each strategy trades independently with its own $ per coin · live prices · no real money</div>
-      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v29 · 2026-09-06 17:59 BST (RSI/Bollinger earn permission, trend late-entry protection, regime stability, correlated exposure, S/R target ceiling)</div>
+      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v30 · 2026-09-07 08:09 BST (shadow-trade tracking for blocked candidates AND early-exit/regime-flip closures, approval reasoning, all gates now logged)</div>
     </div>
     <button id="refreshBtn">Refresh</button>
   </div>
@@ -267,6 +267,10 @@
     <div class="sub" style="margin-top:-4px;">Counter-check system: every hard veto is counted here, broken down by which strategy and coin it's blocking. If a check is firing constantly on one coin, that's worth reviewing — it might mean the check is right, or it might mean it's too strict for that coin.</div>
     <div id="vetoSummaryPanel"></div>
 
+    <div class="section-title">Shadow trades — would blocked candidates have won or lost?</div>
+    <div class="sub" style="margin-top:-4px;">v30: every blocked candidate is tracked as a hypothetical position against real price data, exactly like a live trade. This is the direct answer to "was blocking it the right call" — compared against your ACTUAL trades' win rate above.</div>
+    <div id="shadowSummaryPanel"></div>
+
     <div class="section-title" style="margin-top:16px;" id="sec-positions">Currently open positions</div>
     <div class="table-scroll"><div class="table-inner" id="openPosTable"></div></div>
 
@@ -341,7 +345,7 @@
 // can actually work on them). More coins = more signals = a usable sample size
 // sooner. The exposure cap keeps total risk in check, so a wider list gives the
 // system more to choose from rather than more to pile into.
-const BUILD_TAG = "v29 · 2026-09-06 17:59 BST (earn-permission, late-entry protection, regime stability, S/R ceiling)";
+const BUILD_TAG = "v30 · 2026-09-07 08:09 BST (shadow tracking for blocked entries AND early exits, approval reasoning)";
 
 const DEFAULT_COINS = [
   "BTC", "ETH", "SOL", "BNB", "ADA", "XRP", "DOGE", "AVAX",
@@ -674,6 +678,7 @@ function botSignal(botKey, ind) {
 }
 function runEngineStep() {
   if (!engine) return;
+  resolveShadowTrades();
   coinList.forEach(coin => ensureCoinInEngine(coin));
 
   // ---- MARKET REGIME ----
@@ -939,12 +944,44 @@ function runEngineStep() {
         else if (sig === "bear" && engine.allowShorts) side = "Short";
         if (!side) return;
 
+        // v30 shadow tracking: compute the hypothetical trade plan UP FRONT,
+        // before any veto check runs, using the exact same formulas a real
+        // trade would use. Every decision from here — approved or blocked —
+        // references these same numbers, so blocked candidates can be tracked
+        // against real subsequent price action exactly like a live position.
+        const hypEntry = s.price;
+        let hypStop;
+        if (s.atrPct && s.atrPct > 0) {
+          const hypStopDist = s.atrPct * 2;
+          hypStop = side === "Long" ? hypEntry * (1 - hypStopDist) : hypEntry * (1 + hypStopDist);
+        } else {
+          hypStop = side === "Long" ? s.buyZoneLow : s.sellZoneHigh;
+        }
+        const hypStopDistPct = hypStop ? Math.abs(hypEntry - hypStop) / hypEntry : null;
+        let hypTarget = (hypStopDistPct !== null) ? (side === "Long" ? hypEntry * (1 + hypStopDistPct * 2.5) : hypEntry * (1 - hypStopDistPct * 2.5)) : null;
+        if (hypTarget !== null && bot.key !== "donchian") {
+          const structCeil = side === "Long" ? s.sellZoneHigh : s.buyZoneLow;
+          if (structCeil !== undefined && structCeil !== null) {
+            const beyond = side === "Long" ? hypTarget > structCeil : hypTarget < structCeil;
+            if (beyond) hypTarget = structCeil;
+          }
+        }
+        // Shared logger: call at every rejection point with the specific
+        // veto type + reason. Records both the counter (existing v28 system)
+        // and a trackable shadow position (new).
+        function blockCandidate(vetoType, reason) {
+          recordVeto(vetoType, bot.key, coin, reason);
+          addShadowTrade(bot.key, coin, side, hypEntry, hypStop, hypTarget, reason, vetoType);
+        }
+
         // Re-entry cooldown: confirmed bug where ZEC re-entered long 7 times in
         // ~15 minutes, each stopped straight out, before finally working. After
         // a stop-loss, that coin+strategy+direction is blocked for a cooldown
         // window rather than re-entering the moment the signal flickers back on.
         const cooldownMin = engine.cooldownMinutes !== undefined ? engine.cooldownMinutes : 45;
         if (cooldownMin > 0 && acc.cooldownUntil && acc.cooldownUntil[side] && Date.now() < acc.cooldownUntil[side]) {
+          const minsLeft = ((acc.cooldownUntil[side] - Date.now()) / 60000).toFixed(0);
+          blockCandidate("cooldown_active", `Blocked by cooldown timer — ${minsLeft} min remaining after a recent loss on this coin+direction`);
           return;
         }
 
@@ -966,7 +1003,7 @@ function runEngineStep() {
             const macdChanged = curMacdSign !== prevMacdSign;
             const rsiChanged = curRsiBand !== prevRsiBand;
             if (!regimeChanged && !macdChanged && !rsiChanged) {
-              recordVeto("reentry_unchanged", bot.key, coin, `Re-entry blocked: regime/MACD/RSI all unchanged since the loss ${hoursSinceLoss.toFixed(1)}h ago`);
+              blockCandidate("reentry_unchanged", `Re-entry blocked: regime/MACD/RSI all unchanged since the loss ${hoursSinceLoss.toFixed(1)}h ago`);
               return;
             }
           }
@@ -982,9 +1019,9 @@ function runEngineStep() {
         // 30 seconds later wastes a real trade and a real fee.
         if (engine.useRegimeFilter !== false && bot.key !== "rsi" && bot.key !== "boll") {
           const coinReg = stableRegimeByCoin[coin] || "mixed";
-          if (coinReg === "bull" && side !== "Long") return;
-          if (coinReg === "bear" && side !== "Short") return;
-          if (coinReg === "mixed") return;
+          if (coinReg === "bull" && side !== "Long") { blockCandidate("regime_gate", `${side} vetoed: stable regime is bull, only longs allowed`); return; }
+          if (coinReg === "bear" && side !== "Short") { blockCandidate("regime_gate", `${side} vetoed: stable regime is bear, only shorts allowed`); return; }
+          if (coinReg === "mixed") { blockCandidate("regime_gate", `Vetoed: regime not stable/confirmed (mixed)`); return; }
         }
 
         // v29: RSI/Bollinger no longer get a free pass — they must earn
@@ -997,12 +1034,12 @@ function runEngineStep() {
           if (!engine.reversalConfirm) engine.reversalConfirm = {};
           if (!permission.allowed) {
             engine.reversalConfirm[confirmKey] = 0;
-            recordVeto("reversal_unconfirmed", bot.key, coin, permission.reason);
+            blockCandidate("reversal_unconfirmed", permission.reason);
             return;
           }
           engine.reversalConfirm[confirmKey] = (engine.reversalConfirm[confirmKey] || 0) + 1;
           if (engine.reversalConfirm[confirmKey] < 2) {
-            recordVeto("reversal_unconfirmed", bot.key, coin, "Reversal setup looks valid — needs to hold for one more check before entering (multi-candle confirmation)");
+            blockCandidate("reversal_unconfirmed", "Reversal setup looks valid — needs to hold for one more check before entering (multi-candle confirmation)");
             return;
           }
         }
@@ -1011,7 +1048,7 @@ function runEngineStep() {
         // by participation. Applied as a filter across all strategies rather
         // than as its own bot.
         if (engine.useVolumeFilter && s.volRatio !== null && s.volRatio !== undefined) {
-          if (s.volRatio < 0.8) return; // move happening on unusually thin volume
+          if (s.volRatio < 0.8) { blockCandidate("thin_volume", `Vetoed: volume ${s.volRatio.toFixed(2)}x average, too thin to confirm the move`); return; }
         }
 
         // Correlation / exposure cap: crypto moves together, so 30 longs across
@@ -1051,7 +1088,7 @@ function runEngineStep() {
           const fightingStrongUp = side === "Short" && coinReg === "bull" && roc !== null && roc >= 2.5;
           const fightingStrongDown = side === "Long" && coinReg === "bear" && roc !== null && roc <= -2.5;
           if (fightingStrongUp || fightingStrongDown) {
-            recordVeto("severe_contradiction", bot.key, coin, `${side} vetoed: regime is ${coinReg} AND price still accelerating (${roc.toFixed(1)}% 1h) the same direction — fighting the move, not catching exhaustion`);
+            blockCandidate("severe_contradiction", `${side} vetoed: regime is ${coinReg} AND price still accelerating (${roc.toFixed(1)}% 1h) the same direction — fighting the move, not catching exhaustion`);
             return;
           }
         }
@@ -1068,7 +1105,7 @@ function runEngineStep() {
             const momentumStronglyAgainstLong = side === "Long" && hist < 0 && hist < histPrev; // negative AND getting more negative
             const momentumStronglyAgainstShort = side === "Short" && hist > 0 && hist > histPrev; // positive AND getting more positive
             if (momentumStronglyAgainstLong || momentumStronglyAgainstShort) {
-              recordVeto("severe_contradiction", bot.key, coin, `${side} vetoed: MACD momentum is both against the trade and accelerating (hist ${hist.toFixed(3)} vs ${histPrev.toFixed(3)} ~45min ago)`);
+              blockCandidate("severe_contradiction", `${side} vetoed: MACD momentum is both against the trade and accelerating (hist ${hist.toFixed(3)} vs ${histPrev.toFixed(3)} ~45min ago)`);
               return;
             }
           }
@@ -1087,7 +1124,7 @@ function runEngineStep() {
           const chasingLong = side === "Long" && s.positionInRange > 0.80;
           const chasingShort = side === "Short" && s.positionInRange < 0.20;
           if (chasingLong || chasingShort) {
-            recordVeto("late_entry", bot.key, coin, `${side} vetoed: price already ${(s.positionInRange*100).toFixed(0)}% up its recent range — little room left, likely chasing an extended move`);
+            blockCandidate("late_entry", `${side} vetoed: price already ${(s.positionInRange*100).toFixed(0)}% up its recent range — little room left, likely chasing an extended move`);
             return;
           }
         }
@@ -1103,7 +1140,7 @@ function runEngineStep() {
             const weakeningLong = side === "Long" && hist <= histPrev;
             const weakeningShort = side === "Short" && hist >= histPrev;
             if (weakeningLong || weakeningShort) {
-              recordVeto("weak_momentum", bot.key, coin, `${side} vetoed: MACD sign supports the trade but momentum is fading, not strengthening (hist ${hist.toFixed(3)} vs ${histPrev.toFixed(3)} ~45min ago)`);
+              blockCandidate("weak_momentum", `${side} vetoed: MACD sign supports the trade but momentum is fading, not strengthening (hist ${hist.toFixed(3)} vs ${histPrev.toFixed(3)} ~45min ago)`);
               return;
             }
           }
@@ -1146,7 +1183,7 @@ function runEngineStep() {
         if (actualTargetDistPct < stopDistPct * 0.8) {
           // Capping to real structure left too little reward to justify the
           // risk — reject rather than take a trade with poor real economics.
-          recordVeto("target_capped", bot.key, coin, `After capping to real structure, reward (${(actualTargetDistPct*100).toFixed(2)}%) no longer justifies the risk (${(stopDistPct*100).toFixed(2)}%)`);
+          blockCandidate("target_capped", `After capping to real structure, reward (${(actualTargetDistPct*100).toFixed(2)}%) no longer justifies the risk (${(stopDistPct*100).toFixed(2)}%)`);
           return;
         }
 
@@ -1163,7 +1200,7 @@ function runEngineStep() {
         const expectedFees = notional * engine.feePct * 2;
         const expectedNet = expectedGross - expectedFees;
         const minProfit = engine.minProfit !== undefined ? engine.minProfit : 15;
-        if (expectedNet < minProfit) return;
+        if (expectedNet < minProfit) { blockCandidate("below_min_profit", `Vetoed: expected profit $${expectedNet.toFixed(2)} is below the $${minProfit} minimum`); return; }
 
         // Reachability check: is the target a move this coin actually makes?
         // Compare the required distance against the coin's own average daily
@@ -1171,7 +1208,7 @@ function runEngineStep() {
         const tp3MovePct = actualTargetDistPct;
         const avgDailyRangePct = s.avgDailyRangePct;
         if (avgDailyRangePct && tp3MovePct > avgDailyRangePct * 1.2) {
-          recordVeto("target_infeasible", bot.key, coin, `Target needs a ${(tp3MovePct*100).toFixed(1)}% move but ${coin} typically ranges ${(avgDailyRangePct*100).toFixed(1)}%/day`);
+          blockCandidate("target_infeasible", `Target needs a ${(tp3MovePct*100).toFixed(1)}% move but ${coin} typically ranges ${(avgDailyRangePct*100).toFixed(1)}%/day`);
           return;
         }
 
@@ -1218,7 +1255,15 @@ function runEngineStep() {
         // than presenting it as an unrelated fresh trade. Purely informational —
         // does not affect whether the trade opens (the cooldown above already
         // handles that gate for losing exits).
-        let reasonText = bot.label + " signal";
+        const APPROVAL_REASONS = {
+          rsi: "Earned permission (range state + exhaustion + structural proximity + volume + 2-check confirmation)",
+          boll: "Earned permission (range state + exhaustion + structural proximity + volume + 2-check confirmation)",
+          sma: "Passed stable regime + volume + momentum-strengthening + not-chasing + no severe contradiction",
+          macd: "Passed stable regime + volume + momentum-strengthening + not-chasing + no severe contradiction",
+          donchian: "Passed stable regime + volume (structure-breakout thesis; momentum/chasing checks don't apply here)",
+          funding: "Passed stable regime + volume confirmation",
+        };
+        let reasonText = `${bot.label} signal — ${APPROVAL_REASONS[bot.key] || "passed all active checks"}`;
         if (acc.lastClose && acc.lastClose[side]) {
           const lc = acc.lastClose[side];
           const hoursSince = (Date.now() - lc.time) / 3600000;
@@ -1284,7 +1329,81 @@ function vetoSummary() {
   return counts;
 }
 
+// v30: Shadow trade tracking. Every BLOCKED candidate gets a hypothetical
+// position recorded with the exact entry/stop/target it would have used, then
+// tracked against real subsequent price data exactly like a live trade — so
+// blocked-vs-approved outcomes become directly, honestly comparable instead
+// of guessed at.
+let shadowTrades = JSON.parse(localStorage.getItem("tm2_shadow") || "[]");
+function addShadowTrade(botKey, coin, side, entry, stop, target, reason, vetoType) {
+  if (entry == null || stop == null || target == null) return; // incomplete plan (e.g. no ATR yet) — nothing to track
+  shadowTrades.unshift({
+    id: Date.now() + Math.random(), t: Date.now(), bot: botKey, coin, side,
+    entry, stop, target, reason, vetoType,
+    status: "pending", resolution: null, resolvedAt: null, resolvedPrice: null,
+  });
+  shadowTrades = shadowTrades.slice(0, 2000); // cap growth
+  localStorage.setItem("tm2_shadow", JSON.stringify(shadowTrades));
+}
+function resolveShadowTrades() {
+  const MAX_HOLD_MS = 24 * 3600000;
+  let changed = false;
+  shadowTrades.forEach(st => {
+    if (st.status !== "pending") return;
+    const s = state[st.coin] || wideState[st.coin];
+    if (s && s.times && s.highs && s.lows) {
+      const isLong = st.side === "Long";
+      const sinceIdx = s.times.findIndex(t => t >= st.t);
+      const startIdx = sinceIdx === -1 ? s.times.length - 1 : sinceIdx;
+      for (let i = startIdx; i < s.closes.length; i++) {
+        const hi = s.highs[i], lo = s.lows[i];
+        const hitStop = isLong ? lo <= st.stop : hi >= st.stop;
+        const hitTarget = isLong ? hi >= st.target : lo <= st.target;
+        if (hitStop) { st.status = "resolved"; st.resolution = "would_lose"; st.resolvedAt = Math.max(s.times[i], st.t); st.resolvedPrice = st.stop; changed = true; break; }
+        if (hitTarget) { st.status = "resolved"; st.resolution = "would_win"; st.resolvedAt = Math.max(s.times[i], st.t); st.resolvedPrice = st.target; changed = true; break; }
+      }
+    }
+    if (st.status === "pending" && (Date.now() - st.t) > MAX_HOLD_MS) {
+      st.status = "resolved"; st.resolution = "would_timeout";
+      st.resolvedAt = Date.now(); st.resolvedPrice = s ? s.price : null;
+      changed = true;
+    }
+  });
+  if (changed) localStorage.setItem("tm2_shadow", JSON.stringify(shadowTrades));
+}
+function shadowSummary() {
+  const resolved = shadowTrades.filter(st => st.status === "resolved");
+  const wins = resolved.filter(st => st.resolution === "would_win").length;
+  const losses = resolved.filter(st => st.resolution === "would_lose").length;
+  const timeouts = resolved.filter(st => st.resolution === "would_timeout").length;
+  const pending = shadowTrades.filter(st => st.status === "pending").length;
+  const byType = {};
+  resolved.forEach(st => {
+    if (!byType[st.vetoType]) byType[st.vetoType] = { n: 0, wins: 0, losses: 0, timeouts: 0 };
+    byType[st.vetoType].n++;
+    if (st.resolution === "would_win") byType[st.vetoType].wins++;
+    else if (st.resolution === "would_lose") byType[st.vetoType].losses++;
+    else byType[st.vetoType].timeouts++;
+  });
+  return { total: shadowTrades.length, resolved: resolved.length, wins, losses, timeouts, pending, byType };
+}
+
 function closeFullPosition(acc, p, exitPrice, exitReason, exitTime, engine) {
+  // v30: continuation shadow-check. If this position was closed by a
+  // PROTECTIVE mechanism (early-exit trip-wire or a confirmed regime flip) —
+  // not a real stop-loss or target — track what would have happened if we'd
+  // ignored the trigger and just let the ORIGINAL stop/target keep running.
+  // This is the direct test of whether these protections catch real risk or
+  // close out winners on false flags. Reuses the exact same shadow-trade
+  // engine built for blocked entries — same question, applied to exits.
+  if (exitReason === "Early exit (rapid adverse move)") {
+    addShadowTrade(p.bot, p.coin, p.side, p.entry, p.stop, p.target,
+      "Continuation check: closed by the early-exit trip-wire — would the ORIGINAL stop/target have been reached if left open?", "early_exit_continuation");
+  } else if (exitReason && exitReason.startsWith("Regime flipped")) {
+    addShadowTrade(p.bot, p.coin, p.side, p.entry, p.stop, p.target,
+      "Continuation check: closed by a confirmed regime flip — would the ORIGINAL stop/target have been reached if left open?", "regime_flip_continuation");
+  }
+
   const movePct = p.side === "Long" ? (exitPrice - p.entry) / p.entry : (p.entry - exitPrice) / p.entry;
   const grossPnl = movePct * p.notional;
   const fees = p.notional * engine.feePct * 2;
@@ -1351,6 +1470,8 @@ function renderEngine() {
     document.getElementById("compareTable").innerHTML = `<div style="color:#566078;font-size:12.5px;">${!started ? "Not running yet." : "Enable at least one strategy above."}</div>`;
     document.getElementById("openPosTable").innerHTML = "";
     document.getElementById("closedTradeTable").innerHTML = "";
+    const vEl = document.getElementById("vetoSummaryPanel"); if (vEl) vEl.innerHTML = "";
+    const sEl = document.getElementById("shadowSummaryPanel"); if (sEl) sEl.innerHTML = "";
     return;
   }
 
@@ -1426,19 +1547,28 @@ function renderEngine() {
       : `<div style="color:#566078;">No regime flips or circuit-breaker events yet.</div>`;
   }
 
+  // Shared label lookup for both the Decision Log (vetoes) and Shadow Trades
+  // (continuation checks) panels below — same lookup, two different views of it.
+  const DECISION_LABELS = {
+    severe_contradiction: "Severe contradiction (fighting strong opposing momentum)",
+    target_infeasible: "Target infeasible (needs a move this coin doesn't typically make)",
+    reentry_unchanged: "Re-entry blocked (evidence unchanged since last loss)",
+    late_entry: "Late entry (chasing an already-extended move)",
+    weak_momentum: "Weak momentum (sign supports trade but strength is fading)",
+    target_capped: "Target capped or rejected at real support/resistance",
+    reversal_unconfirmed: "RSI/Bollinger reversal not yet earned",
+    cooldown_active: "Blocked by cooldown timer (recent loss on this coin+direction)",
+    regime_gate: "Regime gate (wrong direction or not yet stable)",
+    thin_volume: "Volume too thin to confirm the move",
+    below_min_profit: "Expected profit below the minimum worth taking",
+    early_exit_continuation: "Early-exit trip-wire (would the ORIGINAL trade have won if left open?)",
+    regime_flip_continuation: "Regime-flip exit (would the ORIGINAL trade have won if left open?)",
+  };
+
   // Decision log / veto counter panel
   const vetoEl = document.getElementById("vetoSummaryPanel");
   if (vetoEl) {
     const summary = vetoSummary();
-    const vetoLabels = {
-      severe_contradiction: "Severe contradiction (fighting strong opposing momentum)",
-      target_infeasible: "Target infeasible (needs a move this coin doesn't typically make)",
-      reentry_unchanged: "Re-entry blocked (evidence unchanged since last loss)",
-      late_entry: "Late entry (chasing an already-extended move)",
-      weak_momentum: "Weak momentum (sign supports trade but strength is fading)",
-      target_capped: "Target capped or rejected at real support/resistance",
-      reversal_unconfirmed: "RSI/Bollinger reversal not yet earned",
-    };
     const keys = Object.keys(summary);
     if (!keys.length) {
       vetoEl.innerHTML = `<div class="event-log" style="color:#566078;">No vetoes fired yet.</div>`;
@@ -1447,8 +1577,48 @@ function renderEngine() {
         const d = summary[k];
         const topCoins = Object.entries(d.byCoin).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([c,n])=>`${c} (${n})`).join(", ");
         const topBots = Object.entries(d.byBot).sort((a,b)=>b[1]-a[1]).map(([b,n])=>`${BOTS.find(x=>x.key===b)?.label || b}: ${n}`).join(", ");
-        return `<div style="padding:6px 0; border-bottom:1px solid rgba(38,48,73,0.6);"><b style="color:#e0ac4c;">${vetoLabels[k] || k}</b> — fired ${d.n} times<br/><span style="color:#7c879c; font-size:10.5px;">By strategy: ${topBots} · Most on: ${topCoins}</span></div>`;
+        return `<div style="padding:6px 0; border-bottom:1px solid rgba(38,48,73,0.6);"><b style="color:#e0ac4c;">${DECISION_LABELS[k] || k}</b> — fired ${d.n} times<br/><span style="color:#7c879c; font-size:10.5px;">By strategy: ${topBots} · Most on: ${topCoins}</span></div>`;
       }).join("")}</div>`;
+    }
+  }
+
+  // Shadow trades summary panel — the direct blocked-vs-real comparison
+  const shadowEl = document.getElementById("shadowSummaryPanel");
+  if (shadowEl) {
+    const ss = shadowSummary();
+    if (ss.total === 0) {
+      shadowEl.innerHTML = `<div class="event-log" style="color:#566078;">No shadow trades yet — these accumulate as vetoes fire.</div>`;
+    } else {
+      const shadowWinRate = ss.resolved ? (ss.wins / (ss.wins + ss.losses || 1) * 100) : 0;
+      // Compare against real trades' win rate for direct context
+      let realWins = 0, realTotal = 0;
+      activeBots.forEach(b => coinList.forEach(coin => {
+        const acc = engine.bots[b.key] && engine.bots[b.key].coins[coin];
+        if (acc) { acc.trades.forEach(t => { realTotal++; if (t.result === "Win") realWins++; }); }
+      }));
+      const realWinRate = realTotal ? (realWins / realTotal * 100) : 0;
+      let html = `<div class="stat-grid" style="margin-bottom:10px;">
+        <div class="stat-box"><div class="stat-label">Shadow trades tracked</div><div class="stat-val">${ss.total}</div></div>
+        <div class="stat-box"><div class="stat-label">Resolved</div><div class="stat-val">${ss.resolved} <span style="font-size:11px; color:#566078;">(${ss.pending} still pending)</span></div></div>
+        <div class="stat-box"><div class="stat-label">Would have WON</div><div class="stat-val pos">${ss.wins}</div></div>
+        <div class="stat-box"><div class="stat-label">Would have LOST</div><div class="stat-val neg">${ss.losses}</div></div>
+        <div class="stat-box highlight"><div class="stat-label">Blocked win rate vs REAL win rate</div><div class="stat-val" style="font-size:18px;">${fmt(shadowWinRate,0)}% <span style="color:#566078; font-size:12px;">vs</span> ${fmt(realWinRate,0)}%</div></div>
+      </div>`;
+      const byTypeKeys = Object.keys(ss.byType);
+      if (byTypeKeys.length) {
+        html += `<div class="event-log">${byTypeKeys.map(k => {
+          const d = ss.byType[k];
+          const wr = (d.wins + d.losses) ? (d.wins / (d.wins + d.losses) * 100) : 0;
+          const isContinuation = k === "early_exit_continuation" || k === "regime_flip_continuation";
+          const tooFew = d.wins + d.losses < 5;
+          const verdict = tooFew ? "Too few resolved yet to judge"
+            : isContinuation
+              ? (wr < 25 ? "Closing early looks like the RIGHT call — the original position mostly would have lost anyway" : wr > 45 ? "May be closing WINNERS too early — worth reviewing how sensitive this trigger is" : "Mixed — inconclusive so far")
+              : (wr < 25 ? "Blocking this looks like the RIGHT call" : wr > 45 ? "This filter may be too strict — worth reviewing" : "Mixed — inconclusive so far");
+          return `<div style="padding:6px 0; border-bottom:1px solid rgba(38,48,73,0.6);"><b style="color:#93a3c2;">${DECISION_LABELS[k] || k}</b> — ${d.n} resolved, ${d.wins}W/${d.losses}L (${fmt(wr,0)}% would-win) · ${d.timeouts} timed out<br/><span style="color:${wr>45?"#f87189":wr<25?"#4ade8f":"#7c879c"}; font-size:10.5px;">${verdict}</span></div>`;
+        }).join("")}</div>`;
+      }
+      shadowEl.innerHTML = html;
     }
   }
 
@@ -1546,6 +1716,12 @@ function generateReport() {
     weak_momentum: "Weak momentum (sign supports trade but strength is fading)",
     target_capped: "Target capped or rejected at real support/resistance",
     reversal_unconfirmed: "RSI/Bollinger reversal not yet earned (range/exhaustion/structure/volume/confirmation)",
+    cooldown_active: "Blocked by cooldown timer (recent loss on this coin+direction)",
+    regime_gate: "Regime gate (wrong direction or not yet stable)",
+    thin_volume: "Volume too thin to confirm the move",
+    below_min_profit: "Expected profit below the minimum worth taking",
+    early_exit_continuation: "Early-exit trip-wire (would the ORIGINAL trade have won if left open?)",
+    regime_flip_continuation: "Regime-flip exit (would the ORIGINAL trade have won if left open?)",
   };
   const vKeys = Object.keys(vSummary);
   if (!vKeys.length) out += "No vetoes fired this run.\n";
@@ -1555,6 +1731,22 @@ function generateReport() {
     const byCoin = Object.entries(d.byCoin).sort((a,b)=>b[1]-a[1]).map(([c,n])=>`${c} (${n})`).join(", ");
     out += `${vLabels[k] || k}: ${d.n} times | By strategy: ${byBot} | By coin: ${byCoin}\n`;
   });
+  out += `\n`;
+
+  out += `=== SHADOW TRADES (would blocked candidates have won or lost?) ===\n`;
+  const ssRep = shadowSummary();
+  out += `Total tracked: ${ssRep.total} | Resolved: ${ssRep.resolved} | Still pending: ${ssRep.pending}\n`;
+  if (ssRep.resolved) {
+    const swr = (ssRep.wins / (ssRep.wins + ssRep.losses || 1)) * 100;
+    out += `Would have WON: ${ssRep.wins} | Would have LOST: ${ssRep.losses} | Timed out: ${ssRep.timeouts} | Blocked win rate: ${fmt(swr,1)}%\n`;
+    Object.keys(ssRep.byType).forEach(k => {
+      const d = ssRep.byType[k];
+      const wr = (d.wins + d.losses) ? (d.wins / (d.wins + d.losses) * 100) : 0;
+      out += `  ${vLabels[k] || k}: ${d.n} resolved, ${d.wins}W/${d.losses}L (${fmt(wr,1)}% would-win), ${d.timeouts} timed out\n`;
+    });
+  } else {
+    out += `No shadow trades resolved yet.\n`;
+  }
   out += `\n`;
 
   out += `=== CORRELATED EXPOSURE (measurement only — strategies remain fully independent) ===\n`;
