@@ -152,7 +152,7 @@
     <div>
       <h1>Trading Monitor</h1>
       <div class="sub">Each strategy trades independently with its own $ per coin · live prices · no real money</div>
-      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v39.1 · 2026-09-09 07:05 BST (shadow openingUncertain flag now persists to localStorage — survives reload before the shadow resolves)</div>
+      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v40 · 2026-09-09 12:45 BST (fixed invalid directional targets after structural capping; decision log summary now genuinely cumulative, not capped at 500)</div>
     </div>
     <button id="refreshBtn">Refresh</button>
   </div>
@@ -265,7 +265,7 @@
     <div id="circuitBreakerInfo" style="font-size:11px; color:#566078; margin-top:4px;"></div>
 
     <div class="section-title">Decision log — why trades get rejected, not just which ones open</div>
-    <div class="sub" style="margin-top:-4px;">Counter-check system: every hard veto is counted here, broken down by which strategy and coin it's blocking. If a check is firing constantly on one coin, that's worth reviewing — it might mean the check is right, or it might mean it's too strict for that coin.</div>
+    <div class="sub" style="margin-top:-4px;">Counter-check system: every hard veto is counted here — these are CUMULATIVE totals for the whole run, broken down by which strategy and coin it's blocking. The individual records shown further down (report export) are capped at the latest 500 for readability, but these summary counts are not. If a check is firing constantly on one coin, that's worth reviewing — it might mean the check is right, or it might mean it's too strict for that coin.</div>
     <div id="vetoSummaryPanel"></div>
 
     <div class="section-title">Shadow trades — would blocked candidates have won or lost?</div>
@@ -336,7 +336,7 @@
   <div class="grid" id="cardGrid"></div>
 
   <div class="footnote" style="text-align:center;">
-    <span style="font-family:monospace; color:#4a5568; font-size:11px;">Build v39.1</span> · Full version history moved to the Excel research register — this footer no longer duplicates it.<br/>
+    <span style="font-family:monospace; color:#4a5568; font-size:11px;">Build v40</span> · Full version history moved to the Excel research register — this footer no longer duplicates it.<br/>
     Assumption recorded: £/$ treated as 1:1 since prices come from USDT pairs — no live FX conversion applied. Fees assumed at 0.1% per side, no funding cost modeled. Each strategy's pot per coin is fully isolated — a loss in one never affects another. Data saved only in this browser. Price/execution simulation uses Binance SPOT candles throughout; the funding-rate signal (used by Funding+Momentum and the scanner) is pulled from the separate PERPETUAL FUTURES market as a sentiment proxy only — no funding payments are simulated or applied to any P&L. Spot and futures prices can differ, so this is a proxy signal, not a futures execution model.
   </div>
 </div>
@@ -346,7 +346,7 @@
 // can actually work on them). More coins = more signals = a usable sample size
 // sooner. The exposure cap keeps total risk in check, so a wider list gives the
 // system more to choose from rather than more to pile into.
-const BUILD_TAG = "v39.1 · 2026-09-09 07:05 BST (shadow openingUncertain now persists to localStorage, survives reload before resolution)";
+const BUILD_TAG = "v40 · 2026-09-09 12:45 BST (fixed invalid directional targets after structural capping; cumulative decision-log totals)";
 
 const DEFAULT_COINS = [
   "BTC", "ETH", "SOL", "BNB", "ADA", "XRP", "DOGE", "AVAX",
@@ -358,6 +358,20 @@ const REFRESH_MS = 30000;
 const LS_COINS = "tm2_coins", LS_TOGGLES = "tm2_toggles", LS_ENGINE = "tm2_engine";
 
 const FIFTEEN_MS = 15 * 60000; // one 15m candle, in ms — used for expiry-boundary checks
+// v40 fix: shared validator for both real and shadow trade plans. The
+// structural target-capping logic (Long capped at resistance, Short capped
+// at support) assumed the structural level was always on the correct side
+// of entry — but if price had already moved beyond that level before this
+// check ran (a genuine, fairly common case), capping to it could push the
+// target to the WRONG side of entry entirely (a Long target below entry, a
+// Short target above it). Applied identically to real and hypothetical
+// plans so they can never diverge on this.
+function validDirectionalPlan(side, entry, stop, target) {
+  if (entry == null || stop == null || target == null) return false;
+  if (side === "Long") return stop < entry && target > entry;
+  if (side === "Short") return stop > entry && target < entry;
+  return false;
+}
 const MAX_STALE_MS = 90000; // 3 refresh cycles — beyond this, a coin's live state is too old to trust for current-price decisions
 // v37 fix (item 10): if analyzeCoin() fails for one ticker, the OLD state
 // object stayed in memory with only an error flag — the engine could still
@@ -1395,13 +1409,25 @@ async function runEngineStep() {
         }
         const hypStopDistPct = hypStop ? Math.abs(hypEntry - hypStop) / hypEntry : null;
         let hypTarget = (hypStopDistPct !== null) ? (side === "Long" ? hypEntry * (1 + hypStopDistPct * 2.5) : hypEntry * (1 - hypStopDistPct * 2.5)) : null;
+        // v40 fix: only cap to the structural level if that level is
+        // genuinely still ahead of entry — if price had already moved
+        // beyond it (a real, fairly common case), capping there would push
+        // the target to the WRONG side of entry entirely, producing an
+        // impossible plan (e.g. a Long target below its own entry).
         if (hypTarget !== null && bot.key !== "donchian") {
           const structCeil = side === "Long" ? s.sellZoneHigh : s.buyZoneLow;
-          if (structCeil !== undefined && structCeil !== null) {
+          const structCeilAhead = structCeil !== undefined && structCeil !== null &&
+            (side === "Long" ? structCeil > hypEntry : structCeil < hypEntry);
+          if (structCeilAhead) {
             const beyond = side === "Long" ? hypTarget > structCeil : hypTarget < structCeil;
             if (beyond) hypTarget = structCeil;
           }
         }
+        // Final invariant: if the plan is directionally impossible (can
+        // happen when structure is exhausted — price already past every
+        // level a target could reasonably cap to), don't track it as a
+        // normal shadow at all.
+        const hypPlanValid = hypTarget === null || validDirectionalPlan(side, hypEntry, hypStop, hypTarget);
         // v34 fix: blocked-entry shadows only ever tracked would-win/would-
         // lose, with no dollar value — a 75% would-win rate can still be
         // economically poor if winners are tiny and losses large. Compute a
@@ -1432,6 +1458,24 @@ async function runEngineStep() {
           engine.lastBlockLog[key] = Date.now();
           recordVeto(vetoType, bot.key, coin, reason);
           addShadowTrade(bot.key, coin, side, hypEntry, hypStop, hypTarget, reason, vetoType, null, hypNotional, engine.feePct);
+        }
+
+        // v40 fix: reject a structurally invalid plan (target ended up on
+        // the wrong side of entry after capping — happens when price has
+        // already moved past every level a target could reasonably cap to)
+        // BEFORE any other veto runs. Logged for visibility, but explicitly
+        // NOT sent through addShadowTrade with an impossible target — a
+        // ChatGPT audit found 13 such invalid shadow plans in one report,
+        // over half of that report's entire "ambiguous" count.
+        if (!hypPlanValid) {
+          const key = `structure_exhausted_${bot.key}_${coin}_${side}`;
+          if (!engine.lastBlockLog) engine.lastBlockLog = {};
+          const last = engine.lastBlockLog[key] || 0;
+          if (Date.now() - last >= 20 * 60000) {
+            engine.lastBlockLog[key] = Date.now();
+            recordVeto("structure_exhausted", bot.key, coin, `${side} vetoed: structural target capping left no valid target ahead of entry (price already past the relevant support/resistance level) — not tracked as a shadow, plan was directionally impossible`);
+          }
+          return;
         }
 
         // Re-entry cooldown: confirmed bug where ZEC re-entered long 7 times in
@@ -1625,12 +1669,28 @@ async function runEngineStep() {
         // that boundary. Donchian is exempt — its entire thesis IS price
         // breaking beyond exactly that boundary, so capping it there would
         // make the strategy untestable.
+        // v40 fix: only cap if the structural level is genuinely still ahead
+        // of entry — if price had already moved past it, capping there
+        // pushed the target to the WRONG side of entry entirely. The
+        // target_capped check below uses Math.abs() for distance, which
+        // doesn't care about direction — it was silently letting a
+        // backwards target through as long as it was "far enough" from
+        // entry in either direction.
         if (bot.key !== "donchian") {
           const structuralCeiling = side === "Long" ? s.sellZoneHigh : s.buyZoneLow;
-          if (structuralCeiling !== undefined && structuralCeiling !== null) {
+          const structuralCeilingAhead = structuralCeiling !== undefined && structuralCeiling !== null &&
+            (side === "Long" ? structuralCeiling > entry : structuralCeiling < entry);
+          if (structuralCeilingAhead) {
             const beyondCeiling = side === "Long" ? target > structuralCeiling : target < structuralCeiling;
             if (beyondCeiling) target = structuralCeiling;
           }
+        }
+        // Directional invariant: reject outright if capping left the target
+        // on the wrong side of entry (structure already exhausted) — this
+        // is the case Math.abs() below would have silently missed.
+        if (!validDirectionalPlan(side, entry, stop, target)) {
+          blockCandidate("structure_exhausted", `${side} vetoed: structural target capping left no valid target ahead of entry (price already past the relevant support/resistance level)`);
+          return;
         }
         // Everything downstream uses the REAL distance to this (possibly
         // capped) target, not the original fixed 2.5x assumption.
@@ -1784,20 +1844,28 @@ function logEngineEvent(msg) {
 // logging every ~30s regardless, which is what actually filled the array.
 let vetoLog = JSON.parse(localStorage.getItem("tm2_vetoes") || "[]");
 function recordVeto(vetoType, bot, coin, reason) {
+  // v40 fix: vetoLog was capped at 500, and vetoSummary() counted directly
+  // from it — meaning on a multi-day run generating more than 500 veto
+  // events, the summary silently represented only the most recent 500, not
+  // the whole run, while the UI presented it as if it were cumulative.
+  // Cumulative counters now update here, BEFORE the detail array trims, so
+  // the summary is genuinely full-run regardless of how much detail gets
+  // evicted for storage.
+  if (!engine.vetoTotals) engine.vetoTotals = {};
+  if (!engine.vetoTotals[vetoType]) engine.vetoTotals[vetoType] = { n: 0, byBot: {}, byCoin: {} };
+  engine.vetoTotals[vetoType].n++;
+  engine.vetoTotals[vetoType].byBot[bot] = (engine.vetoTotals[vetoType].byBot[bot] || 0) + 1;
+  engine.vetoTotals[vetoType].byCoin[coin] = (engine.vetoTotals[vetoType].byCoin[coin] || 0) + 1;
+
   vetoLog.unshift({ t: Date.now(), type: vetoType, bot, coin, reason });
-  vetoLog = vetoLog.slice(0, 500); // keep enough history for the report, cap growth
+  vetoLog = vetoLog.slice(0, 500); // keep enough DETAIL for the report, cap growth — cumulative totals above are unaffected by this trim
   localStorage.setItem("tm2_vetoes", JSON.stringify(vetoLog));
 }
 function vetoSummary() {
-  const counts = {};
-  vetoLog.forEach(v => {
-    const key = v.type;
-    if (!counts[key]) counts[key] = { n: 0, byBot: {}, byCoin: {} };
-    counts[key].n++;
-    counts[key].byBot[v.bot] = (counts[key].byBot[v.bot] || 0) + 1;
-    counts[key].byCoin[v.coin] = (counts[key].byCoin[v.coin] || 0) + 1;
-  });
-  return counts;
+  // v40 fix: now reads cumulative totals (see recordVeto), not the
+  // 500-capped detail array — this is the full-run summary the UI always
+  // implied it was showing.
+  return engine.vetoTotals || {};
 }
 
 // v30: Shadow trade tracking. Every BLOCKED candidate gets a hypothetical
@@ -2335,6 +2403,7 @@ function renderEngine() {
     regime_flip_continuation: "Regime-flip exit (would the ORIGINAL trade have won if left open?)",
     exposure_cap: "Exposure cap (already at max same-direction positions)",
     stop_too_tight: "Stop distance too tight to be meaningful",
+    structure_exhausted: "Structural target capping left no valid target ahead of entry",
   };
 
   // Decision log / veto counter panel
@@ -2486,7 +2555,8 @@ function generateReport() {
   out += `STRATEGY COMPARISON REPORT\nGenerated: ${new Date().toLocaleString()}\nRunning since: ${new Date(engine.startedAt).toLocaleString()}\nBuild: ${BUILD_TAG}\n`;
   out += `Assumption: $ per coin per strategy = $${engine.perCoinCapital}, treated 1:1 with £. Leverage ${engine.leverage}x. Fees 0.1% per side, no funding modeled. Price/execution uses SPOT candles; funding-rate signal is from PERPETUAL FUTURES as a sentiment proxy only, not simulated as a cost.\n\n`;
 
-  out += `=== DECISION LOG (why trades were rejected, v28/v29) ===\n`;
+  out += `=== DECISION LOG — CUMULATIVE TOTALS FOR THIS RUN (why trades were rejected) ===\n`;
+  out += `These counts are cumulative for the whole run, not limited by the 500-record detail cap below.\n`;
   const vSummary = vetoSummary();
   const vLabels = {
     severe_contradiction: "Severe contradiction (fighting strong opposing momentum)",
@@ -2504,6 +2574,7 @@ function generateReport() {
     regime_flip_continuation: "Regime-flip exit (would the ORIGINAL trade have won if left open?)",
     exposure_cap: "Exposure cap (already at max same-direction positions)",
     stop_too_tight: "Stop distance too tight to be meaningful",
+    structure_exhausted: "Structural target capping left no valid target ahead of entry",
   };
   const vKeys = Object.keys(vSummary);
   if (!vKeys.length) out += "No vetoes fired this run.\n";
