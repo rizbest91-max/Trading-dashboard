@@ -86,7 +86,7 @@
   .trow { display: grid; grid-template-columns: 80px 60px 55px 85px 85px 90px 65px 80px; gap: 6px; font-size: 10.5px; padding: 6px 4px; border-bottom: 1px solid rgba(26,33,48,0.9); align-items: center; transition: background 0.15s ease; }
   .trow.head { color: #566078; font-weight: 600; border-bottom: 1px solid rgba(38,48,73,0.9); }
   .trow:not(.head):hover { background: rgba(74,222,143,0.03); }
-  .trow .win { color: #4ade8f; } .trow .loss { color: #f87189; }
+  .trow .win { color: #4ade8f; } .trow .loss { color: #f87189; } .trow .ambiguous-result { color: #e0ac4c; }
   .table-scroll { overflow-x: auto; }
   .table-inner { min-width: 660px; }
   .long-tag { color: #4ade8f; } .short-tag { color: #f87189; }
@@ -152,7 +152,7 @@
     <div>
       <h1>Trading Monitor</h1>
       <div class="sub">Each strategy trades independently with its own $ per coin · live prices · no real money</div>
-      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v33-CG · 2026-09-08 (ChatGPT integrity build — sequencing, ledger, veto attribution, timeout and data-quality fixes)</div>
+      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v39.1 · 2026-09-09 07:05 BST (shadow openingUncertain flag now persists to localStorage — survives reload before the shadow resolves)</div>
     </div>
     <button id="refreshBtn">Refresh</button>
   </div>
@@ -227,9 +227,9 @@
       <span><label>Circuit breaker (halt if open losses hit)</label>
         <select id="engCircuit">
           <option value="0">Off</option>
-          <option value="5">-5% of deployed margin</option>
-          <option value="8" selected>-8% of deployed margin</option>
-          <option value="12">-12% of deployed margin</option>
+          <option value="5">-5% of capital</option>
+          <option value="8" selected>-8% of capital</option>
+          <option value="12">-12% of capital</option>
         </select>
       </span>
       <span><label>Max positions same direction (per strategy)</label>
@@ -262,6 +262,7 @@
 
     <div class="section-title">Engine events</div>
     <div class="event-log" id="eventLog"></div>
+    <div id="circuitBreakerInfo" style="font-size:11px; color:#566078; margin-top:4px;"></div>
 
     <div class="section-title">Decision log — why trades get rejected, not just which ones open</div>
     <div class="sub" style="margin-top:-4px;">Counter-check system: every hard veto is counted here, broken down by which strategy and coin it's blocking. If a check is firing constantly on one coin, that's worth reviewing — it might mean the check is right, or it might mean it's too strict for that coin.</div>
@@ -335,8 +336,8 @@
   <div class="grid" id="cardGrid"></div>
 
   <div class="footnote" style="text-align:center;">
-    <span style="font-family:monospace; color:#4a5568; font-size:11px;">Build v33-CG</span> · Full version history moved to the Excel research register — this footer no longer duplicates it.<br/>
-    Assumption recorded: £/$ treated as 1:1 since prices come from USDT perpetual-futures pairs — no live FX conversion applied. Fees are modeled at 0.1% per side using entry and exit value; funding P/L is not charged. Each strategy's pot per coin is fully isolated — a loss in one never affects another. Data saved only in this browser.
+    <span style="font-family:monospace; color:#4a5568; font-size:11px;">Build v39.1</span> · Full version history moved to the Excel research register — this footer no longer duplicates it.<br/>
+    Assumption recorded: £/$ treated as 1:1 since prices come from USDT pairs — no live FX conversion applied. Fees assumed at 0.1% per side, no funding cost modeled. Each strategy's pot per coin is fully isolated — a loss in one never affects another. Data saved only in this browser. Price/execution simulation uses Binance SPOT candles throughout; the funding-rate signal (used by Funding+Momentum and the scanner) is pulled from the separate PERPETUAL FUTURES market as a sentiment proxy only — no funding payments are simulated or applied to any P&L. Spot and futures prices can differ, so this is a proxy signal, not a futures execution model.
   </div>
 </div>
 
@@ -345,7 +346,7 @@
 // can actually work on them). More coins = more signals = a usable sample size
 // sooner. The exposure cap keeps total risk in check, so a wider list gives the
 // system more to choose from rather than more to pile into.
-const BUILD_TAG = "v33-CG · 2026-09-08 (ChatGPT integrity build — v31 base + measurement/research fixes)";
+const BUILD_TAG = "v39.1 · 2026-09-09 07:05 BST (shadow openingUncertain now persists to localStorage, survives reload before resolution)";
 
 const DEFAULT_COINS = [
   "BTC", "ETH", "SOL", "BNB", "ADA", "XRP", "DOGE", "AVAX",
@@ -354,8 +355,20 @@ const DEFAULT_COINS = [
 ];
 const LONG_WINDOW = 96; // 24 hours of 15m candles — wider zones, fewer whipsaw exits
 const REFRESH_MS = 30000;
-const LS_COINS = "cg33_coins", LS_TOGGLES = "cg33_toggles", LS_ENGINE = "cg33_engine";
+const LS_COINS = "tm2_coins", LS_TOGGLES = "tm2_toggles", LS_ENGINE = "tm2_engine";
 
+const FIFTEEN_MS = 15 * 60000; // one 15m candle, in ms — used for expiry-boundary checks
+const MAX_STALE_MS = 90000; // 3 refresh cycles — beyond this, a coin's live state is too old to trust for current-price decisions
+// v37 fix (item 10): if analyzeCoin() fails for one ticker, the OLD state
+// object stayed in memory with only an error flag — the engine could still
+// see a stale price/indicators/candle array as if it were current. This
+// checks both explicit staleness and simple age, so new entries and
+// current-price protective decisions can require genuinely fresh data.
+function isFreshState(s) {
+  if (!s || s.price === null || s.stale) return false;
+  if (s.freshAt === undefined) return true; // pre-v37 state shape (e.g. right after Reset before first fetch) — don't false-flag as stale
+  return (Date.now() - s.freshAt) < MAX_STALE_MS;
+}
 const BOTS = [
   { key: "sma", label: "SMA Crossover" },
   { key: "rsi", label: "RSI" },
@@ -368,49 +381,58 @@ const BOTS = [
 let coinList = JSON.parse(localStorage.getItem(LS_COINS) || "null") || DEFAULT_COINS.slice();
 let toggles = JSON.parse(localStorage.getItem(LS_TOGGLES) || "null") || { sma: true, rsi: true, macd: true, boll: true, donchian: true, funding: true };
 let engine = JSON.parse(localStorage.getItem(LS_ENGINE) || "null");
+
+// v33 fix: migration for engines saved before the immutable ledger existed
+// (pre-v32). Without this, an engine loaded from an older localStorage save
+// would show a broken/empty ledger in every report even though the
+// account-level trade history (acc.trades) is still fully intact — the
+// ledger and the accounts would silently disagree. Runs once, flagged so it
+// never re-runs and can't create duplicates on a later load.
+if (engine && !engine._ledgerMigrated) {
+  if (!engine.allTradesEver) engine.allTradesEver = [];
+  const seen = new Set(engine.allTradesEver.map(t => `${t.bot}_${t.coin}_${t.closedAt}_${t.netPnl}`));
+  BOTS.forEach(b => {
+    if (!engine.bots || !engine.bots[b.key]) return;
+    Object.keys(engine.bots[b.key].coins).forEach(coin => {
+      const acc = engine.bots[b.key].coins[coin];
+      if (!acc || !acc.trades) return;
+      acc.trades.forEach(t => {
+        const key = `${b.key}_${coin}_${t.closedAt}_${t.netPnl}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          engine.allTradesEver.push({ ...t, bot: t.bot || b.key, coin: t.coin || coin, botLabel: t.botLabel || b.label });
+        }
+      });
+    });
+  });
+  engine._ledgerMigrated = true;
+  localStorage.setItem(LS_ENGINE, JSON.stringify(engine));
+}
+
+// v32: count of same-candle stop+target ambiguity (see resolveShadowArray and
+// the position-scan loop below) — reported so data quality stays visible.
+let ambiguousCandleCount = parseInt(localStorage.getItem("tm2_ambiguous") || "0");
 const state = {};
-const FIFTEEN_MS = 15 * 60 * 1000;
-const ONE_MIN_MS = 60 * 1000;
-let ambiguousCandleCount = parseInt(localStorage.getItem("cg33_ambiguous") || "0");
-let refreshInProgress = false;
-let refreshGeneration = 0;
-const minuteWindowCache = new Map();
 
 function saveCoins() { localStorage.setItem(LS_COINS, JSON.stringify(coinList)); }
 function saveToggles() { localStorage.setItem(LS_TOGGLES, JSON.stringify(toggles)); }
 function saveEngine() { localStorage.setItem(LS_ENGINE, JSON.stringify(engine)); }
 
-function tradeLedgerKey(t) {
-  return [t.bot, t.coin, t.side, t.openedAt || "", t.closedAt || "", t.entry || "", t.exitPrice || ""].join("|");
-}
-function migrateEngineLedger() {
-  if (!engine || !engine.bots) return;
-  if (!Array.isArray(engine.allTradesEver)) engine.allTradesEver = [];
-  const seen = new Set(engine.allTradesEver.map(tradeLedgerKey));
-  BOTS.forEach(b => {
-    const bot = engine.bots[b.key];
-    if (!bot || !bot.coins) return;
-    Object.values(bot.coins).forEach(acc => {
-      (acc && acc.trades ? acc.trades : []).forEach(t => {
-        const rec = { ...t, bot: t.bot || b.key };
-        const k = tradeLedgerKey(rec);
-        if (!seen.has(k)) { engine.allTradesEver.push(rec); seen.add(k); }
-      });
-    });
-  });
-  engine.integritySchema = 33;
-  saveEngine();
-}
-migrateEngineLedger();
-
-function canonicalLedger() { return engine && Array.isArray(engine.allTradesEver) ? engine.allTradesEver : []; }
-
-function trimShadowArrayPreservePending(arr, maxResolved) {
-  const pending = arr.filter(x => x.status === "pending");
-  const resolved = arr.filter(x => x.status !== "pending").sort((a,b) => (b.t||0) - (a.t||0));
-  const kept = pending.concat(resolved.slice(0, maxResolved));
-  kept.sort((a,b) => (b.t||0) - (a.t||0));
-  return kept;
+// v33: storage-size monitoring. acc.trades and engine.allTradesEver both
+// store the full trade record (real duplication — flagged by the audit),
+// but removing acc.trades now would be a real regression risk since it's
+// been the foundational storage since v1. Lower-risk fix: surface a visible
+// warning before approaching typical browser localStorage limits (~5-10MB),
+// so the duplication becomes a known, monitored tradeoff instead of a
+// silent one.
+function estimateLocalStorageBytes() {
+  let total = 0;
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    const val = localStorage.getItem(key);
+    if (val) total += (key.length + val.length) * 2; // JS strings are UTF-16
+  }
+  return total;
 }
 
 function smaArr(v, w) { const o = new Array(v.length).fill(null); for (let i = w - 1; i < v.length; i++) { let s = 0; for (let j = i - w + 1; j <= i; j++) s += v[j]; o[i] = s / w; } return o; }
@@ -422,49 +444,29 @@ function ema(v, p) {
   } return o;
 }
 function computeRSI(c, p = 14) {
-  // Wilder RSI, matching the conventional RSI(14) methodology used by most
-  // trading/charting platforms. Uses completed history recursively rather than
-  // a simple average of only the last 14 changes.
-  if (!c || c.length < p + 1) return null;
-  let gains = 0, losses = 0;
-  for (let i = 1; i <= p; i++) {
-    const d = c[i] - c[i - 1];
-    if (d >= 0) gains += d; else losses -= d;
-  }
-  let avgGain = gains / p, avgLoss = losses / p;
-  for (let i = p + 1; i < c.length; i++) {
-    const d = c[i] - c[i - 1];
-    const gain = d > 0 ? d : 0;
-    const loss = d < 0 ? -d : 0;
-    avgGain = ((avgGain * (p - 1)) + gain) / p;
-    avgLoss = ((avgLoss * (p - 1)) + loss) / p;
-  }
-  if (avgLoss === 0) return 100;
-  const rs = avgGain / avgLoss;
-  return 100 - (100 / (1 + rs));
+  if (c.length < p + 1) return null;
+  let g = 0, l = 0;
+  for (let i = c.length - p; i < c.length; i++) { const d = c[i] - c[i - 1]; if (d >= 0) g += d; else l -= d; }
+  const ag = g / p, al = l / p; if (al === 0) return 100; return 100 - 100 / (1 + ag / al);
 }
-
-function fastROC(closes, period = 4) {
+// v32: hoisted from inside runEngineStep to global scope — both are pure
+// functions of their input, and closeFullPosition needs coinRegime too, for
+// capturing exit-time conditions (see the exitSnapshot fix below).
+function fastROC(closes, period = 4) { // 4 x 15m = ~1h
   if (!closes || closes.length <= period) return null;
   const past = closes[closes.length - 1 - period], now = closes[closes.length - 1];
   return past ? ((now - past) / past) * 100 : null;
 }
-
-function coinRegime(s, confirmed = false) {
-  if (!s) return "mixed";
-  const price = confirmed ? s.confirmedPrice : s.price;
-  const sma96 = confirmed ? s.confirmedSma96 : s.sma96;
-  const sma192 = confirmed ? s.confirmedSma192 : s.sma192;
-  const closes = confirmed ? s.completedCloses : s.closes;
-  if (!price) return "mixed";
+function coinRegime(s) {
+  if (!s || !s.price) return "mixed";
   let slow = "mixed";
-  if (sma96 && sma192) {
-    if (price > sma96 && price > sma192) slow = "bull";
-    else if (price < sma96 && price < sma192) slow = "bear";
+  if (s.sma96 && s.sma192) {
+    if (s.price > s.sma96 && s.price > s.sma192) slow = "bull";
+    else if (s.price < s.sma96 && s.price < s.sma192) slow = "bear";
   }
-  const roc = fastROC(closes);
+  const roc = fastROC(s.closes);
   if (roc !== null) {
-    if (roc <= -1.5) return "bear";
+    if (roc <= -1.5) return "bear"; // sharp 1h drop overrides the slow average
     if (roc >= 1.5) return "bull";
   }
   return slow;
@@ -530,17 +532,151 @@ function decimalsFor(price) {
 }
 
 async function fetchKlines(symbol) {
-  // Perpetual-futures candles keep price data consistent with the funding signal
-  // and the leveraged paper-trading model. 500 x 15m ~= 5.2 days.
-  const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}USDT&interval=15m&limit=500`;
+  // 15m candles give finer resolution for catching stop/target touches between refreshes
+  // v32 fix: was limit=200 (~50h, barely 2 days), so the daily-range
+  // calculation below — designed to average up to 5 days — usually only had
+  // 2 to work with, and SMA192 had almost no trailing buffer once it started
+  // computing at all. 500 candles (~5.2 days) actually delivers what both were
+  // designed for, still a single request (Binance allows up to 1000).
+  const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}USDT&interval=15m&limit=500`;
   const res = await fetch(url);
   if (!res.ok) throw new Error("HTTP " + res.status + " for " + symbol);
   const raw = await res.json();
   return {
-    closes: raw.map(k => parseFloat(k[4])), highs: raw.map(k => parseFloat(k[2])), lows: raw.map(k => parseFloat(k[3])),
-    volumes: raw.map(k => parseFloat(k[5])), times: raw.map(k => k[0]),
+    closes: raw.map(k => parseFloat(k[4])),
+    highs: raw.map(k => parseFloat(k[2])),
+    lows: raw.map(k => parseFloat(k[3])),
+    volumes: raw.map(k => parseFloat(k[5])),
+    times: raw.map(k => k[0]),
   };
 }
+// v35: selective 1-minute resolver. Kept on Binance SPOT (same market as
+// everything else — no switch to futures), used ONLY for the three cases
+// where a normal 15m candle genuinely can't give a trustworthy answer:
+// the partial opening candle, an ambiguous same-candle SL+TP touch, and the
+// partial candle spanning a max-hold expiry. A normal candle that resolves
+// cleanly never triggers this — no extra API load for the common case.
+//
+// Cached by coin + the 15m candle's own open timestamp, so multiple
+// strategies/shadows asking about the SAME 15m window share one fetch
+// instead of each firing its own request.
+const oneMinCache = new Map();
+const oneMinInFlight = new Map(); // in-flight promises, so concurrent callers share one fetch
+const oneMinCacheTime = new Map(); // when each cache entry was written, for TTL purposes
+async function fetch1mCandles(coin, candle15mOpenTime) {
+  const cacheKey = `${coin}_${candle15mOpenTime}`;
+  const isCompletedWindowNow = (candle15mOpenTime + FIFTEEN_MS) <= Date.now();
+
+  // v37 fix: the previous version decided permanence using isCompletedWindow
+  // evaluated at LOOKUP time, not fetch time. A bucket fetched at 10:14:55
+  // while still forming (incomplete data) would get silently treated as
+  // permanent on a LATER lookup at 10:15:02, once the window had since
+  // completed — even though the actual cached data was never refetched and
+  // is missing the final seconds. Now stores whether the window was ALREADY
+  // complete at the moment of the fetch, and forces exactly one refetch the
+  // first time a forming-fetched entry is looked up after its window closes.
+  if (oneMinCache.has(cacheKey)) {
+    const cached = oneMinCache.get(cacheKey); // { candles, fetchedAsCompleted } or null
+    const age = Date.now() - (oneMinCacheTime.get(cacheKey) || 0);
+    if (cached === null) {
+      if (age < 15000) return null; // negative-cache TTL for failed fetches
+      // else: TTL expired, fall through and retry
+    } else if (cached.fetchedAsCompleted) {
+      return cached.candles; // genuinely immutable — fetched after the window had already closed
+    } else if (!isCompletedWindowNow) {
+      if (age < 20000) return cached.candles; // still forming, short TTL, refresh periodically
+      // else: refresh as more of the candle has played out
+    }
+    // else: window has NOW completed but this entry was fetched while still
+    // forming — force exactly one final refetch, falling through below.
+  }
+
+  // v36 fix: cache the IN-FLIGHT PROMISE itself, not just the eventual
+  // result — otherwise multiple strategies/shadows asking about the SAME
+  // window concurrently would each fire their own duplicate fetch, since
+  // none of them see a completed result in the cache yet.
+  if (oneMinInFlight.has(cacheKey)) return oneMinInFlight.get(cacheKey).then(r => r ? r.candles : null);
+
+  const promise = (async () => {
+    try {
+      const startTime = candle15mOpenTime;
+      const endTime = candle15mOpenTime + FIFTEEN_MS;
+      const url = `https://api.binance.com/api/v3/klines?symbol=${coin}USDT&interval=1m&startTime=${startTime}&endTime=${endTime}&limit=16`;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 4000);
+      const res = await fetch(url, { signal: controller.signal });
+      clearTimeout(timer);
+      if (!res.ok) { oneMinCache.set(cacheKey, null); oneMinCacheTime.set(cacheKey, Date.now()); return null; }
+      const raw = await res.json();
+      const candles = raw.map(k => ({ t: k[0], h: parseFloat(k[2]), l: parseFloat(k[3]), c: parseFloat(k[4]) }));
+      // fetchedAsCompleted reflects whether the window was ALREADY closed at
+      // the moment of THIS fetch — not re-derived later from current time.
+      const fetchedAsCompleted = (candle15mOpenTime + FIFTEEN_MS) <= Date.now();
+      const record = { candles, fetchedAsCompleted };
+      oneMinCache.set(cacheKey, record);
+      oneMinCacheTime.set(cacheKey, Date.now());
+      return record;
+    } catch (e) {
+      oneMinCache.set(cacheKey, null); oneMinCacheTime.set(cacheKey, Date.now());
+      return null;
+    } finally {
+      oneMinInFlight.delete(cacheKey);
+    }
+  })();
+  oneMinInFlight.set(cacheKey, promise);
+  const result = await promise;
+  return result ? result.candles : null;
+}
+
+// Walks 1-minute candles in true chronological order to resolve exactly
+// which level was touched first. windowStart/windowEnd let callers scope
+// this to only the relevant portion (e.g. entry time onward for the opening
+// candle, or up to expiry for a boundary-spanning candle).
+// Returns null if 1m data is unavailable OR still ambiguous even at 1m
+// resolution (both levels touched in the same 1-minute candle) — caller
+// falls back to existing safe behavior in either case.
+async function resolveWithOneMinute(coin, side, stop, target, candle15mOpenTime, windowStart, windowEnd) {
+  const candles = await fetch1mCandles(coin, candle15mOpenTime);
+  if (!candles || !candles.length) return null;
+  const isLong = side === "Long";
+  const ONE_MIN = 60000;
+  let lastValidPrice = null, lastValidTime = null;
+  for (const c of candles) {
+    const cEnd = c.t + ONE_MIN;
+    if (cEnd <= windowStart || c.t >= windowEnd) continue; // no overlap with the valid window at all — safe to skip
+
+    // v37 fix: a 1-minute candle can itself straddle the boundary (e.g. entry
+    // at 10:07:35 falls inside the 10:07:00-10:07:59 minute, or expiry at
+    // 10:07:35 does too). Previously the ENTIRE candle was either discarded
+    // (silently missing real movement in the valid portion) or included
+    // whole (silently crediting movement from the invalid portion) — neither
+    // is correct without sub-minute data. Now: if the boundary candle's
+    // range genuinely couldn't touch either level, it's still safe to skip.
+    // If it COULD, we can't tell whether that happened in the valid or
+    // invalid portion, so it's marked uncertain instead of guessing.
+    const isBoundaryCandle = (c.t < windowStart) || (cEnd > windowEnd);
+    const hitStop = isLong ? c.l <= stop : c.h >= stop;
+    const hitTarget = isLong ? c.h >= target : c.l <= target;
+
+    if (isBoundaryCandle) {
+      if (hitStop || hitTarget) return { hit: "uncertain", time: c.t, price: null, lastValidPrice, lastValidTime };
+      lastValidPrice = c.c; lastValidTime = Math.min(cEnd, windowEnd) - 1;
+      continue; // genuinely no touch possible in this boundary candle — safe to skip
+    }
+
+    if (hitStop && hitTarget) return null; // still ambiguous even at 1m — genuinely simultaneous
+    if (hitStop) return { hit: "stop", time: c.t, price: stop, lastValidPrice, lastValidTime };
+    if (hitTarget) return { hit: "target", time: c.t, price: target, lastValidPrice, lastValidTime };
+    lastValidPrice = c.c; lastValidTime = c.t;
+  }
+  // v37 fix: previously returned price:null here unconditionally, leaving
+  // callers with nothing to price an expiry/timeout against — the dead
+  // `priceNearExpiry` code downstream always fell back to the coarse 15m
+  // close. Now returns the last known valid 1-minute close and its
+  // timestamp, so a timeout can be priced close to the real expiry moment.
+  return { hit: "neither", time: null, price: null, lastValidPrice, lastValidTime };
+}
+
 async function fetchFundingRate(symbol) {
   // Real, free, public futures data — very positive funding means longs are
   // crowded (paying shorts to hold), which is a genuine contrarian signal.
@@ -685,163 +821,6 @@ function sparklineSVG(closes, color) {
   </svg>`;
 }
 
-async function fetchMinuteWindow(symbol, candleOpen) {
-  const key = `${symbol}_${candleOpen}`;
-  const candleEnd = candleOpen + FIFTEEN_MS;
-  const cached = minuteWindowCache.get(key);
-  const isComplete = Date.now() >= candleEnd;
-  const ttl = isComplete ? (24 * 60 * 60 * 1000) : 5000;
-  if (cached && (Date.now() - cached.cachedAt) < ttl) return cached.data;
-  try {
-    const endTime = candleEnd - 1;
-    const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}USDT&interval=1m&startTime=${candleOpen}&endTime=${endTime}&limit=20`;
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const raw = await res.json();
-    const data = raw.map(k => ({ t: k[0], h: parseFloat(k[2]), l: parseFloat(k[3]), c: parseFloat(k[4]) }));
-    minuteWindowCache.set(key, { cachedAt: Date.now(), data });
-    return data;
-  } catch (e) { return null; }
-}
-
-async function fetch15mRange(symbol, startTime, endTime) {
-  const rows = [];
-  let cursor = Math.floor(startTime / FIFTEEN_MS) * FIFTEEN_MS;
-  const hardEnd = Math.max(cursor, endTime);
-  let loops = 0;
-  try {
-    while (cursor < hardEnd && loops < 8) {
-      const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}USDT&interval=15m&startTime=${cursor}&endTime=${hardEnd}&limit=1000`;
-      const res = await fetch(url);
-      if (!res.ok) return null;
-      const raw = await res.json();
-      if (!raw.length) break;
-      rows.push(...raw);
-      const next = raw[raw.length - 1][0] + FIFTEEN_MS;
-      if (next <= cursor) break;
-      cursor = next;
-      loops++;
-      if (raw.length < 1000) break;
-    }
-    if (!rows.length) return null;
-    return {
-      closes: rows.map(k => parseFloat(k[4])), highs: rows.map(k => parseFloat(k[2])), lows: rows.map(k => parseFloat(k[3])),
-      times: rows.map(k => k[0]), price: parseFloat(rows[rows.length - 1][4]), recoverySeries: true,
-    };
-  } catch (e) { return null; }
-}
-
-function pnlForExit(side, entry, exitPrice, notional, quantity, feePct) {
-  if (!notional || !entry || exitPrice == null) return null;
-  const q = quantity || (notional / entry);
-  const movePct = side === "Long" ? (exitPrice - entry) / entry : (entry - exitPrice) / entry;
-  const gross = movePct * notional;
-  const entryFee = notional * feePct;
-  const exitFee = (q * exitPrice) * feePct;
-  return { gross, fees: entryFee + exitFee, net: gross - entryFee - exitFee };
-}
-
-function updateExcursion(track, side, entry, hi, lo) {
-  if (hi == null || lo == null || !entry) return;
-  const adverse = side === "Long" ? (entry - lo) / entry * 100 : (hi - entry) / entry * 100;
-  const favorable = side === "Long" ? (hi - entry) / entry * 100 : (entry - lo) / entry * 100;
-  if (adverse > track.maePct) track.maePct = adverse;
-  if (favorable > track.mfePct) track.mfePct = favorable;
-}
-
-async function inspectPricePath(coin, side, entry, stop, target, startTime, endTime, s, initialMae = 0, initialMfe = 0) {
-  const track = { maePct: initialMae || 0, mfePct: initialMfe || 0 };
-  if (!s || !s.times || !s.highs || !s.lows || endTime <= startTime) return { outcome: null, ...track, quality: "no_data" };
-  let series = s;
-  if (s.times.length && startTime < s.times[0]) {
-    const recovered = await fetch15mRange(coin, startTime, endTime);
-    if (!recovered || !recovered.times || !recovered.times.length) return { outcome: null, ...track, quality: "history_gap" };
-    series = recovered;
-  }
-  const isLong = side === "Long";
-  let startIdx = series.times.findIndex(t => (t + FIFTEEN_MS) > startTime);
-  if (startIdx < 0) startIdx = Math.max(0, series.times.length - 1);
-
-  for (let i = startIdx; i < series.times.length; i++) {
-    const candleOpen = series.times[i], candleEnd = candleOpen + FIFTEEN_MS;
-    if (candleOpen >= endTime) break;
-    if (candleEnd <= startTime) continue;
-    const hi15 = series.highs[i], lo15 = series.lows[i];
-    const hitStop15 = isLong ? lo15 <= stop : hi15 >= stop;
-    const hitTarget15 = isLong ? hi15 >= target : lo15 <= target;
-    const partialStart = startTime > candleOpen;
-    const partialEnd = endTime < candleEnd;
-    const needsMinute = partialStart || partialEnd || (hitStop15 && hitTarget15);
-
-    if (needsMinute) {
-      const mins = await fetchMinuteWindow(coin, candleOpen);
-      if (!mins || !mins.length) {
-        if (hitStop15 || hitTarget15) return { outcome: "ambiguous", eventTime: Math.min(candleEnd, endTime), ...track, quality: "ambiguous_no_1m" };
-        continue;
-      }
-      for (const m of mins) {
-        const mEnd = m.t + ONE_MIN_MS;
-        if (mEnd <= startTime || m.t >= endTime) continue;
-        const partialMinute = m.t < startTime || mEnd > endTime;
-        const hitStop = isLong ? m.l <= stop : m.h >= stop;
-        const hitTarget = isLong ? m.h >= target : m.l <= target;
-        if (!partialMinute) updateExcursion(track, side, entry, m.h, m.l);
-        if (hitStop || hitTarget) {
-          if (partialMinute || (hitStop && hitTarget)) {
-            return { outcome: "ambiguous", eventTime: Math.min(mEnd, endTime), ...track, quality: partialMinute ? "ambiguous_partial_1m" : "ambiguous_same_1m" };
-          }
-          return { outcome: hitStop ? "stop" : "target", eventTime: mEnd, exitPrice: hitStop ? stop : target, ...track, quality: "1m_sequence" };
-        }
-      }
-    } else {
-      updateExcursion(track, side, entry, hi15, lo15);
-      if (hitStop15) return { outcome: "stop", eventTime: Math.min(candleEnd, endTime), exitPrice: stop, ...track, quality: "15m_single_touch" };
-      if (hitTarget15) return { outcome: "target", eventTime: Math.min(candleEnd, endTime), exitPrice: target, ...track, quality: "15m_single_touch" };
-    }
-  }
-  return { outcome: null, ...track, quality: "resolved_path" };
-}
-
-async function priceNearTime(coin, timeMs, fallbackPrice) {
-  const candleOpen = Math.floor(timeMs / FIFTEEN_MS) * FIFTEEN_MS;
-  const mins = await fetchMinuteWindow(coin, candleOpen);
-  if (mins && mins.length) {
-    const completed = mins.filter(m => (m.t + ONE_MIN_MS) <= timeMs);
-    if (completed.length) return { price: completed[completed.length - 1].c, quality: "timeout_1m" };
-  }
-  return { price: fallbackPrice, quality: "timeout_fallback_live" };
-}
-
-async function manageOpenPosition(bot, coin, acc, s) {
-  if (!acc || !acc.position || !s || !s.price) return;
-  const p = acc.position;
-  const maxHoldMs = (p.maxHoldMs || ((engine.maxHoldHours || 24) * 3600000));
-  const expiryTime = p.expiryTime || (p.openedAt + maxHoldMs);
-  p.maxHoldMs = maxHoldMs; p.expiryTime = expiryTime;
-  const scanEnd = Math.min(Date.now(), expiryTime);
-  const result = await inspectPricePath(coin, p.side, p.entry, p.stop, p.target, p.openedAt, scanEnd, s, p.maePct || 0, p.mfePct || 0);
-  p.maePct = result.maePct || 0; p.mfePct = result.mfePct || 0;
-  if (!acc.position) return;
-  if (result.outcome === "stop") {
-    closeFullPosition(acc, p, p.stop, "Stop-loss hit", result.eventTime, engine, { dataQuality: result.quality });
-    return;
-  }
-  if (result.outcome === "target") {
-    closeFullPosition(acc, p, p.target, "TP3 hit", result.eventTime, engine, { dataQuality: result.quality });
-    return;
-  }
-  if (result.outcome === "ambiguous") {
-    ambiguousCandleCount++; localStorage.setItem("cg33_ambiguous", String(ambiguousCandleCount));
-    closeFullPosition(acc, p, p.entry, "Ambiguous intrabar sequence", result.eventTime, engine,
-      { resultOverride: "Ambiguous", neutralizePnl: true, dataQuality: result.quality });
-    return;
-  }
-  if (Date.now() >= expiryTime && acc.position) {
-    const px = await priceNearTime(coin, expiryTime, s.price);
-    closeFullPosition(acc, p, px.price, `Timed out (${engine.maxHoldHours || 24}h)`, expiryTime, engine, { dataQuality: px.quality });
-  }
-}
-
 function renderToggles() {
   document.getElementById("toggleRow").innerHTML = BOTS.map(b => `
     <div class="toggle-chip ${toggles[b.key] ? "on" : ""}" onclick="flipToggle('${b.key}')"><span class="switch-dot"></span>${b.label}</div>`).join("");
@@ -856,17 +835,35 @@ function addCoin(t) {
   refresh();
 }
 function removeCoin(t) {
+  // v32 fix: removing a coin deleted it from coinList and state immediately,
+  // with no check for open positions. Since position-management loops iterate
+  // coinList, any strategy still holding this coin would become orphaned —
+  // losing stop/target checks, regime-flip protection, and early-exit
+  // coverage entirely, silently. Block removal until every position closes.
   if (engine) {
     const openBots = BOTS.filter(b => {
       const acc = engine.bots[b.key] && engine.bots[b.key].coins[t];
       return acc && acc.position;
     });
     if (openBots.length) {
-      alert(`Can't remove ${t} while an open position exists (${openBots.map(b => b.label).join(", ")}). Existing positions must keep stop/target/timeout protection.`);
+      alert(`Can't remove ${t} — ${openBots.map(b => b.label).join(", ")} still ${openBots.length > 1 ? "have" : "has"} an open position on it. Wait for it to close first, or that position would lose all protection (stop/target checks, regime-flip exit, early-exit) silently.`);
       return;
     }
   }
+  // v34 fix: real positions were protected, but a PENDING shadow trade on
+  // this coin wasn't — resolveShadowArray falls back to state[coin] ||
+  // v37 fix (item 18): previously only warned and hoped wideState still had
+  // the coin — now research fetching for any coin with pending shadows
+  // continues independently via refresh()'s researchCoins set (see there),
+  // regardless of visible coinList membership. Removal here only affects
+  // live trading visibility, not research data collection, so this no
+  // longer needs to be a scary confirm — just an informational note.
+  const pendingOnCoin = shadowTrades.concat(continuationShadows).filter(st => st.coin === t && st.status === "pending");
+  if (pendingOnCoin.length) {
+    logScanActivity(`${t} removed from live trading — ${pendingOnCoin.length} pending shadow trade${pendingOnCoin.length > 1 ? "s" : ""} will keep collecting price data in the background until resolved.`);
+  }
   coinList = coinList.filter(c => c !== t); delete state[t]; saveCoins(); renderChips(); renderCards();
+  // Remember the user removed this by hand so the scanner won't keep re-adding it
   if (!blockedCoins.includes(t)) { blockedCoins.push(t); saveBlocked(); }
   delete autoAdded[t]; saveAutoAdded();
 }
@@ -889,12 +886,16 @@ function startEngine() {
     bots[b.key] = { coins: {} };
     coinList.forEach(c => { bots[b.key].coins[c] = { cash: perCoinCapital, initial: perCoinCapital, position: null, trades: [] }; });
   });
-  engine = { startedAt: Date.now(), perCoinCapital, leverage, allowShorts, minProfit, maxHoldHours, useRegimeFilter, circuitBreakerPct, maxSameDirection, useVolumeFilter, cooldownMinutes, halted: false, feePct: 0.001, bots, allTradesEver: [], integritySchema: 33, vetoTotals: {} };
-  vetoLog = []; localStorage.setItem("cg33_vetoes", "[]");
-  shadowTrades = []; localStorage.setItem("cg33_shadow", "[]");
-  continuationShadows = []; localStorage.setItem("cg33_continuation", "[]");
-  ambiguousCandleCount = 0; localStorage.setItem("cg33_ambiguous", "0");
-  engineEvents = []; localStorage.setItem("cg33_events", "[]");
+  engine = { startedAt: Date.now(), perCoinCapital, leverage, allowShorts, minProfit, maxHoldHours, useRegimeFilter, circuitBreakerPct, maxSameDirection, useVolumeFilter, cooldownMinutes, halted: false, feePct: 0.001, bots, allTradesEver: [] };
+  // v34 fix: only resetEngine() cleared veto/shadow/ambiguous history — this
+  // path (used for the very first start, or any start not preceded by an
+  // explicit Reset) left old decision-log and shadow-trade data sitting in
+  // place, silently mixing into whatever new run began here.
+  engineEvents = []; localStorage.setItem("tm2_events", "[]");
+  vetoLog = []; localStorage.setItem("tm2_vetoes", "[]");
+  shadowTrades = []; localStorage.setItem("tm2_shadow", "[]");
+  continuationShadows = []; localStorage.setItem("tm2_continuation", "[]");
+  ambiguousCandleCount = 0; localStorage.setItem("tm2_ambiguous", "0");
   saveEngine();
   renderEngine();
 }
@@ -914,11 +915,13 @@ function resetEngine() {
   // v30 fix: vetoLog and shadowTrades were never cleared by Reset, so old
   // entries from before a reset would silently mix with the new run's data —
   // misleading now that the full report dumps individual records.
-  vetoLog = []; localStorage.setItem("cg33_vetoes", "[]");
-  shadowTrades = []; localStorage.setItem("cg33_shadow", "[]");
-  continuationShadows = []; localStorage.setItem("cg33_continuation", "[]");
-  ambiguousCandleCount = 0; localStorage.setItem("cg33_ambiguous", "0");
-  engineEvents = []; localStorage.setItem("cg33_events", "[]");
+  vetoLog = []; localStorage.setItem("tm2_vetoes", "[]");
+  shadowTrades = []; localStorage.setItem("tm2_shadow", "[]");
+  continuationShadows = []; localStorage.setItem("tm2_continuation", "[]");
+  engineEvents = []; localStorage.setItem("tm2_events", "[]");
+  ambiguousCandleCount = 0; localStorage.setItem("tm2_ambiguous", "0");
+  oneMinCache.clear(); // v35: in-memory only, not persisted — cleared for cleanliness, stale entries were harmless anyway since they're keyed by exact timestamp
+  oneMinCacheTime.clear(); oneMinInFlight.clear(); // v36: the two new maps added alongside the cache itself
 }
 function ensureCoinInEngine(coin) {
   if (!engine) return;
@@ -939,7 +942,12 @@ async function runEngineStep() {
   coinList.forEach(coin => ensureCoinInEngine(coin));
 
   // ---- MARKET REGIME ----
-  // Global fastROC/coinRegime helpers are shared by entries, exits and re-entry snapshots.
+  // v22 fix: was BTC-only and used a slow 24h/48h average, which lagged real
+  // moves by hours (confirmed cause of most of a -$707 loss day). Now: (1) each
+  // coin gets its OWN regime rather than one BTC signal gating everything, and
+  // (2) a fast rate-of-change check can override the slow average the moment a
+  // sharp move happens, instead of waiting for the average to catch up.
+  // (fastROC and coinRegime now defined globally, above — used here via closure)
 
   // v29: Regime stability requirement for NEW ENTRIES. v27 already required
   // 2 consecutive checks before CLOSING a position on a regime flip — but
@@ -948,19 +956,29 @@ async function runEngineStep() {
   // confirmed". Computed once per coin per tick (not per bot) so the
   // consecutive-count is accurate rather than inflated by being called once
   // per active strategy.
+  //
+  // v34 fix: v32's fix required the candle timestamp to advance, but still
+  // used s.times[length-1] — the CURRENTLY FORMING candle, not a completed
+  // one. So "confirmed across a candle boundary" could still mean "a new
+  // candle started 5 seconds ago," not "a full candle actually closed."
+  // Now uses the last CLOSED candle (length-2, since the tail entry is
+  // always still forming) — genuine confirmed-candle-close confirmation.
   if (!engine.regimeStability) engine.regimeStability = {};
   function stableCoinRegime(coin, s) {
-    const reading = coinRegime(s, true);
-    const candleTime = s.lastCompletedCandleTime != null ? s.lastCompletedCandleTime : null;
+    const reading = coinRegime(s);
+    const lastClosedCandleTime = (s.times && s.times.length >= 2) ? s.times[s.times.length - 2] : null;
     const prev = engine.regimeStability[coin];
     if (prev && prev.value === reading) {
-      if (candleTime !== null && candleTime !== prev.lastCandleTime) {
+      if (lastClosedCandleTime !== null && lastClosedCandleTime !== prev.lastCandleTime) {
         prev.count = (prev.count || 1) + 1;
-        prev.lastCandleTime = candleTime;
+        prev.lastCandleTime = lastClosedCandleTime;
       }
+      // same closed candle as last check — don't inflate the count on a repeat read
     } else {
-      engine.regimeStability[coin] = { value: reading, count: 1, lastCandleTime: candleTime };
+      engine.regimeStability[coin] = { value: reading, count: 1, lastCandleTime: lastClosedCandleTime };
     }
+    // Unconfirmed readings are treated as "mixed" (no new trend entries) —
+    // same safe default already used for genuinely indecisive regimes.
     return engine.regimeStability[coin].count >= 2 ? reading : "mixed";
   }
   const stableRegimeByCoin = {};
@@ -973,28 +991,23 @@ async function runEngineStep() {
   //      strongly established one-way trend)
   //   2. Exhaustion — momentum in the direction being faded must be WEAKENING,
   //      not just "reached an extreme"
-  //   3. Genuine proximity to 24h structural close-range, not just an RSI number
+  //   3. Genuine proximity to real support/resistance, not just an RSI number
   //   4. Volume consistent with a real reversal (not a quiet drift to an extreme)
   // A 5th requirement (multi-check persistence) is applied where this is used.
-  function checkMeanReversionPermission(s, side, confirmed = false) {
-    const price = confirmed ? s.confirmedPrice : s.price;
-    const sma96 = confirmed ? s.confirmedSma96 : s.sma96;
-    const sma192 = confirmed ? s.confirmedSma192 : s.sma192;
-    const ind = confirmed ? s.confirmedIndicators : s.indicators;
-    const pos = confirmed ? s.confirmedPositionInRange : s.positionInRange;
-    if (sma96 && sma192 && price) {
-      const spread = Math.abs(sma96 - sma192) / price;
+  function checkMeanReversionPermission(s, side) {
+    if (s.sma96 && s.sma192 && s.price) {
+      const spread = Math.abs(s.sma96 - s.sma192) / s.price;
       if (spread >= 0.02) return { allowed: false, reason: "Not a confirmed range — slow trend averages are diverging strongly (established trend, not a range)" };
     }
-    const hist = ind && ind.macd ? ind.macd.hist : null, histPrev = ind && ind.macd ? ind.macd.histPrev : null;
+    const hist = s.indicators.macd.hist, histPrev = s.indicators.macd.histPrev;
     if (hist === null || histPrev === null) return { allowed: false, reason: "Insufficient MACD history to confirm exhaustion" };
     const exhaustion = side === "Long" ? (hist > histPrev) : (hist < histPrev);
     if (!exhaustion) return { allowed: false, reason: "No sign of exhaustion — momentum in the recent direction hasn't started fading yet" };
-    if (pos === undefined || pos === null) return { allowed: false, reason: "No range-position data available" };
-    const nearStructure = side === "Long" ? pos < 0.15 : pos > 0.85;
-    if (!nearStructure) return { allowed: false, reason: `Not close enough to structural range boundary (at ${(pos*100).toFixed(0)}% of its range)` };
+    if (s.positionInRange === undefined) return { allowed: false, reason: "No range-position data available" };
+    const nearStructure = side === "Long" ? s.positionInRange < 0.15 : s.positionInRange > 0.85;
+    if (!nearStructure) return { allowed: false, reason: `Not close enough to real support/resistance (at ${(s.positionInRange*100).toFixed(0)}% of its range)` };
     if (s.volRatio === undefined || s.volRatio === null || s.volRatio < 1.0) return { allowed: false, reason: `Volume too thin for a credible reversal (${s.volRatio != null ? s.volRatio.toFixed(2) : "?"}x average)` };
-    return { allowed: true, reason: "Range state, exhaustion, structural proximity, and completed-candle volume support a reversal setup" };
+    return { allowed: true, reason: "Range state, exhaustion, structural proximity, and volume all support a genuine reversal setup" };
   }
 
   // BTC regime kept only for the dashboard summary box (informational) — actual
@@ -1004,27 +1017,196 @@ async function runEngineStep() {
   const prevRegime = engine.currentRegime;
   engine.currentRegime = regime;
 
-  // ---- PRIMARY POSITION LIFECYCLE ----
-  // Manage stop/target/max-hold for every existing position regardless of toggle.
-  // This pass runs before protective regime/ROC exits, so a trade that should
-  // already have stopped, targeted or expired while the browser slept cannot be
-  // closed later at a different protective price.
-  const lifecycleTasks = [];
-  BOTS.forEach(bot => {
-    Object.keys(engine.bots[bot.key].coins || {}).forEach(coin => {
-      const acc = engine.bots[bot.key].coins[coin];
-      const s = state[coin] || wideState[coin];
-      if (acc && acc.position && s && s.price != null) lifecycleTasks.push(manageOpenPosition(bot, coin, acc, s));
-    });
-  });
-  if (lifecycleTasks.length) await Promise.all(lifecycleTasks);
-
   // ---- PROTECTION FOR OPEN POSITIONS ----
-  // The regime filter only ever blocked NEW entries. If the market flipped while
-  // 35 longs were open, every one would sit there until it individually hit its
-  // stop — roughly $450 of damage at the observed average loss. These two guards
-  // close positions that are on the wrong side of a changed market.
+  // v36 fix: this entire block (regime-flip exit, early-exit trip-wire,
+  // circuit breaker) used to run HERE — before the historical reconciliation
+  // loop below. That meant after any delay (browser sleep, network gap), a
+  // position whose REAL stop or target was touched hours ago could get
+  // force-closed by a cruder, current-price-only check before the accurate
+  // historical scan (with the 1-minute resolver) ever got a chance to find
+  // the true, earlier outcome. Moved to run AFTER historical reconciliation
+  // — see the same "PROTECTION FOR OPEN POSITIONS" block further down.
+  // v37 fix: removed the early "if (engine.halted) return" that used to sit
+  // here. "Halted" must mean "no new entries," not "stop managing
+  // positions" — if the circuit breaker couldn't close one position (e.g.
+  // that coin had no usable price at the time), it would remain open and
+  // permanently unmanaged on every subsequent refresh while halted was true.
+  // Phase 1 (reconcile) and the protection block always run now; only Phase
+  // 3 (new entries, below) is actually gated by engine.halted.
 
+  // v37 fix: PHASE 1 — reconcile ALL existing open positions FIRST, fully
+  // awaited, before any new-entry evaluation happens. Previously reconciliation
+  // and new-entry evaluation shared the same async pass — since reconciliation
+  // can await 1-minute data, a new candidate's exposure-cap/portfolio-state
+  // check could run while another coin's position hadn't yet finished
+  // historical recovery, evaluating against stale state.
+  await Promise.all(BOTS.map(async (bot) => {
+    await Promise.all(coinList.map(async (coin) => {
+      const acc = engine.bots[bot.key].coins[coin];
+      const s = state[coin];
+      if (!acc || !s || s.price === null || !s.indicators) return;
+      if (!acc.position) return; // nothing to reconcile — new-entry evaluation happens in Phase 3, below
+
+      if (acc.position) {
+        const p = acc.position;
+        // v33 fix: candle timestamps are OPEN times (Binance convention). The
+        // old `findIndex(t => t >= p.openedAt)` found the NEXT candle after a
+        // mid-candle entry (e.g. entry at 10:07 with candles at 10:00/10:15
+        // matched 10:15, not 10:00) — meaning the candle that actually
+        // contains the entry moment was skipped entirely (any stop/target
+        // touch between 10:07-10:15 was invisible), while the following,
+        // already-safe candle got incorrectly treated as "the opening candle"
+        // and had its real data replaced unnecessarily. Now finds the last
+        // candle whose open time is at or before entry — the one entry
+        // genuinely happened inside.
+        let startIdx = 0;
+        for (let j = 0; j < s.times.length; j++) {
+          if (s.times[j] <= p.openedAt) startIdx = j; else break;
+        }
+
+        // v33 fix: compute the max-hold deadline BEFORE scanning, so a stop/
+        // target touch that happened AFTER the trade should already have
+        // timed out (e.g. the browser was asleep and woke up well past the
+        // deadline) doesn't get opportunistically credited as a real win or
+        // loss. Timeout takes priority over anything past its own boundary.
+        const maxHoldMs = (engine.maxHoldHours || 24) * 3600000;
+        const expiryTime = p.openedAt + maxHoldMs;
+
+        // Scan every 15m candle since the trade opened — not just the latest
+        // price — so brief spikes aren't missed between refreshes.
+        // Single exit only: stop-loss or TP3. No partial closes, no breakeven
+        // protection — one entry, one exit, one fee pair per trade.
+        for (let i = startIdx; i < s.closes.length; i++) {
+          const candleTime = s.times[i];
+          const isLong = p.side === "Long";
+          const isOpeningCandle = (i === startIdx);
+
+          // v34 fix: was `candleTime > expiryTime` — comparing expiry against
+          // the candle's OPEN time meant a candle spanning the expiry moment
+          // (e.g. expiry at 10:07, candle 10:00-10:15) still got scanned in
+          // full, allowing a stop/target touch at 10:12 — after the trade
+          // should already have timed out — to get credited anyway. Now
+          // checks whether the candle's END extends past expiry, catching
+          // both "entirely after" and "spans the boundary" cases.
+          if (candleTime + FIFTEEN_MS > expiryTime) {
+            // v35: try to price the expiry moment precisely with 1-minute
+            // data (only the pre-expiry portion of this candle) instead of
+            // just falling back to the previous candle's close. Also checks
+            // whether stop/target was genuinely hit BEFORE expiry — if so,
+            // that's a real result, not a timeout.
+            const oneMin = await resolveWithOneMinute(coin, p.side, p.stop, p.target, candleTime, Math.max(candleTime, p.openedAt), expiryTime);
+            if (oneMin && oneMin.hit === "stop") { closeFullPosition(acc, p, oneMin.price, "Stop-loss hit", oneMin.time, engine); break; }
+            if (oneMin && oneMin.hit === "target") { closeFullPosition(acc, p, oneMin.price, "TP3 hit", oneMin.time, engine); break; }
+            // v38 fix: "uncertain" (the boundary minute could have touched a
+            // level, but we can't tell if it was before or after expiry) was
+            // previously falling through silently to an ordinary timeout —
+            // effectively discarding the uncertainty rather than surfacing
+            // it. Now genuinely ambiguous, not a clean result.
+            const oneMinUncertain = oneMin && oneMin.hit === "uncertain";
+            // v37 fix: this was dead code — the ternary always evaluated to
+            // null either way, and the variable was never even used below.
+            // The whole 1-minute expiry machinery was built but never
+            // actually wired up to price the timeout. Now genuinely uses
+            // the last valid 1-minute price/time when available, only
+            // falling back to the coarse 15m close if 1m data was entirely
+            // unavailable for this window.
+            const priceNearExpiry = (oneMin && oneMin.lastValidPrice !== null) ? oneMin.lastValidPrice : null;
+            const timeNearExpiry = (oneMin && oneMin.lastValidTime !== null) ? oneMin.lastValidTime : expiryTime;
+            const fallbackPrice = priceNearExpiry !== null ? priceNearExpiry : (i > startIdx ? s.closes[i - 1] : p.entry);
+            closeFullPosition(acc, p, fallbackPrice, oneMinUncertain ? `Timed out (${engine.maxHoldHours || 24}h) (ambiguous — boundary minute could have touched a level, timing uncertain)` : `Timed out (${engine.maxHoldHours || 24}h)`, timeNearExpiry, engine);
+            break;
+          }
+
+          // v32 fix: the OPENING candle can span time BEFORE entry too — entry
+          // normally happens mid-candle, not exactly on a 15m boundary. Using
+          // that candle's full historical high/low risked a false stop/target
+          // trigger from price action that happened before the trade existed.
+          // v35: now tries real 1-minute data from entry time onward first —
+          // only falls back to the live-price proxy if 1m data is unavailable.
+          let hi, lo, oneMinOpeningResult = null;
+          if (isOpeningCandle) {
+            oneMinOpeningResult = await resolveWithOneMinute(coin, p.side, p.stop, p.target, candleTime, p.openedAt, candleTime + FIFTEEN_MS);
+            if (oneMinOpeningResult && oneMinOpeningResult.hit === "stop") { closeFullPosition(acc, p, oneMinOpeningResult.price, "Stop-loss hit", oneMinOpeningResult.time, engine); return; }
+            if (oneMinOpeningResult && oneMinOpeningResult.hit === "target") { closeFullPosition(acc, p, oneMinOpeningResult.price, "TP3 hit", oneMinOpeningResult.time, engine); return; }
+            // v39 fix: counting alone wasn't enough — the trade continued
+            // using the live-price proxy and could still resolve as a clean
+            // Win or Loss later, even though a genuine touch might have
+            // happened right after entry that this candle can't rule out.
+            // Now flags the position itself, so whatever it eventually
+            // resolves to gets classified Ambiguous — consistent with how
+            // every other uncertain case in this system is treated.
+            if (oneMinOpeningResult && oneMinOpeningResult.hit === "uncertain") {
+              ambiguousCandleCount++; localStorage.setItem("tm2_ambiguous", ambiguousCandleCount);
+              p.openingUncertain = true;
+            }
+            // "neither" (checked, genuinely clean) or null (1m unavailable) both fall through safely to the proxy below for MAE/MFE tracking purposes
+            hi = Math.max(s.price, p.entry);
+            lo = Math.min(s.price, p.entry);
+          } else {
+            hi = s.highs[i]; lo = s.lows[i];
+          }
+
+          // MAE/MFE tracking: how far did price move against us (adverse) and in
+          // our favor (favorable) at any point during this candle, regardless of
+          // whether the trade eventually won or lost. Updated every scan so it
+          // reflects the true worst/best excursion, not just the closing price.
+          const adverseExtreme = isLong ? lo : hi;
+          const favorableExtreme = isLong ? hi : lo;
+          const adversePct = isLong ? (p.entry - adverseExtreme) / p.entry * 100 : (adverseExtreme - p.entry) / p.entry * 100;
+          const favorablePct = isLong ? (favorableExtreme - p.entry) / p.entry * 100 : (p.entry - favorableExtreme) / p.entry * 100;
+          if (adversePct > p.maePct) p.maePct = adversePct;
+          if (favorablePct > p.mfePct) p.mfePct = favorablePct;
+
+          const hitStop = isLong ? lo <= p.stop : hi >= p.stop;
+          const hitTarget = isLong ? hi >= p.target : lo <= p.target;
+
+          // v32 fix: if a single (non-opening) candle's range touches BOTH
+          // levels, we genuinely don't know which came first without 1-minute
+          // data. Previously this silently always resolved as a loss — a real
+          // bias, since it could never falsely create a win but could always
+          // convert a real win into a recorded loss.
+          // v35: now TRIES real 1-minute data first to determine the true
+          // sequence — only falls back to the "Ambiguous" classification if
+          // 1m data is unavailable, or genuinely ambiguous even at that
+          // resolution (both levels touched within the same 1-minute candle).
+          let bothHitCandidate = hitStop && hitTarget && !isOpeningCandle;
+          if (bothHitCandidate) {
+            const oneMin = await resolveWithOneMinute(coin, p.side, p.stop, p.target, candleTime, candleTime, candleTime + FIFTEEN_MS);
+            if (oneMin && oneMin.hit === "stop") { closeFullPosition(acc, p, oneMin.price, "Stop-loss hit", oneMin.time, engine); return; }
+            if (oneMin && oneMin.hit === "target") { closeFullPosition(acc, p, oneMin.price, "TP3 hit", oneMin.time, engine); return; }
+            // 1m unavailable, or still ambiguous even at 1m resolution — fall through to honest Ambiguous classification below
+          }
+          const ambiguous = bothHitCandidate;
+          if (ambiguous) { ambiguousCandleCount++; localStorage.setItem("tm2_ambiguous", ambiguousCandleCount); }
+
+          if (hitStop) { closeFullPosition(acc, p, p.stop, ambiguous ? "Stop-loss hit (ambiguous — candle touched both levels)" : "Stop-loss hit", Math.max(candleTime, p.openedAt), engine); break; }
+          if (hitTarget) { closeFullPosition(acc, p, p.target, "TP3 hit", Math.max(candleTime, p.openedAt), engine); break; }
+        }
+
+        // Fallback for the NORMAL (non-recovery) case: no candle crossed the
+        // expiry boundary above (we're still within bounds), but real time
+        // has passed since the last completed candle and we're now past the
+        // deadline on live clock time.
+        if (acc.position) {
+          if (Date.now() - p.openedAt > maxHoldMs) {
+            closeFullPosition(acc, p, s.price, `Timed out (${engine.maxHoldHours || 24}h)`, Date.now(), engine);
+          }
+        }
+
+        // NOTE: the old "signal reversed" exit was removed here. It closed 40 trades
+        // in the 02-03 Sep run for a net -$88.65 at a 15% win rate — bailing out on
+        // indicator noise and paying a fee pair each time. Exits are now stop-loss,
+        // TP3, or the max-duration timeout only.
+      }
+    }));
+  }));
+
+  // ---- PROTECTION FOR OPEN POSITIONS (moved here in v36 — see note above) ----
+  // Runs AFTER the historical reconciliation loop above, so it only ever acts
+  // on positions that genuinely remain open once their real stop/target/expiry
+  // history has been checked — never preempting an accurate historical result
+  // with a cruder, current-price-only decision.
+  //
   // 1. Regime flip: each coin's OWN direction reversed, so exit positions
   //    fighting it. Uses per-coin regime now, not one BTC signal for everything.
   //    RSI and Bollinger are exempt — they're mean-reversion strategies designed
@@ -1042,24 +1224,26 @@ async function runEngineStep() {
   if (engine.useRegimeFilter !== false) {
     let flipClosed = 0;
     BOTS.forEach(bot => {
+      // v32 fix: no toggle check here — a toggle controls NEW entries, not
+      // whether an already-open position keeps getting protected. Toggling a
+      // strategy off used to silently strip regime-flip protection from any
+      // position it still had open.
       if (bot.key === "rsi" || bot.key === "boll") return; // exempt mean-reversion
       coinList.forEach(coin => {
         const acc = engine.bots[bot.key].coins[coin];
         const s = state[coin];
         if (!acc || !acc.position || !s || !s.price) return;
+        // v37 fix (item 10): a stale price shouldn't drive a force-close
+        // decision — wait for fresh data rather than acting on old info.
+        if (!isFreshState(s)) return;
         const p = acc.position;
-        const coinReg = coinRegime(s, true);
+        const coinReg = coinRegime(s);
         const wrongSide = (coinReg === "bear" && p.side === "Long") ||
                           (coinReg === "bull" && p.side === "Short");
-        const completedTime = s.lastCompletedCandleTime;
         if (wrongSide) {
-          if (completedTime != null && completedTime !== p.regimeMismatchLastCandleTime) {
-            p.regimeMismatchCount = (p.regimeMismatchCount || 0) + 1;
-            p.regimeMismatchLastCandleTime = completedTime;
-          }
+          p.regimeMismatchCount = (p.regimeMismatchCount || 0) + 1;
         } else {
           p.regimeMismatchCount = 0;
-          p.regimeMismatchLastCandleTime = completedTime;
         }
         if (p.regimeMismatchCount >= 2) {
           closeFullPosition(acc, p, s.price, `Regime flipped to ${coinReg} (confirmed)`, Date.now(), engine);
@@ -1067,7 +1251,7 @@ async function runEngineStep() {
         }
       });
     });
-    if (flipClosed) logEngineEvent(`Regime check closed ${flipClosed} position(s) now fighting their coin's own trend (confirmed over 2 completed candles).`);
+    if (flipClosed) logEngineEvent(`Regime check closed ${flipClosed} position(s) now fighting their coin's own trend (confirmed over 2 checks).`);
   }
 
   // 1b. Per-position early-exit trip-wire — independent of the portfolio-level
@@ -1087,10 +1271,14 @@ async function runEngineStep() {
   // developing adverse move is worth reacting to regardless of strategy.
   const EARLY_EXIT_GRACE_MS = { rsi: 20 * 60000, boll: 20 * 60000 };
   BOTS.forEach(bot => {
+    // v32 fix: no toggle check — existing open positions must keep getting
+    // early-exit protection even if the strategy is toggled off for new trades.
     coinList.forEach(coin => {
       const acc = engine.bots[bot.key].coins[coin];
       const s = state[coin];
       if (!acc || !acc.position || !s || !s.price) return;
+      // v37 fix (item 10): same freshness requirement as regime-flip — see comment there.
+      if (!isFreshState(s)) return;
       const p = acc.position;
       const grace = EARLY_EXIT_GRACE_MS[bot.key];
       if (grace && (Date.now() - p.openedAt) < grace) return; // still in grace period
@@ -1106,55 +1294,86 @@ async function runEngineStep() {
     });
   });
 
-  // 2. Portfolio circuit breaker: denominator is DEPLOYED MARGIN, not all idle
-  // strategy/coin pots. This makes the UI percentage describe capital actually
-  // exposed right now and avoids a large watched universe silently weakening it.
+  // 2. Portfolio circuit breaker: if total open losses exceed the limit, close
+  //    everything and stop opening new trades until the user restarts. This is a
+  //    last-resort brake for a fast market-wide move, not normal trade management.
   if (engine.circuitBreakerPct && !engine.halted) {
-    let totalUnreal = 0, deployedMargin = 0;
+    let totalUnreal = 0, totalCapital = 0;
     BOTS.forEach(bot => {
-      Object.keys(engine.bots[bot.key].coins || {}).forEach(coin => {
+      // v32 fix: no toggle check — a toggled-off strategy's open losses must
+      // still count toward the circuit breaker, or a user could accidentally
+      // hide real drawdown from the safety mechanism by disabling a strategy.
+      coinList.forEach(coin => {
         const acc = engine.bots[bot.key].coins[coin];
-        const s = state[coin] || wideState[coin];
-        if (acc && acc.position) {
-          deployedMargin += acc.position.margin || 0;
-          if (s && s.price) {
-            const p = acc.position;
-            const movePct = p.side === "Long" ? (s.price - p.entry) / p.entry : (p.entry - s.price) / p.entry;
-            totalUnreal += movePct * p.notional;
-          }
+        const s = state[coin];
+        if (!acc) return;
+        totalCapital += acc.initial;
+        // v37 fix (item 10): stale price excluded from the drawdown
+        // calculation entirely — a coin whose fetch has been failing
+        // shouldn't silently contribute (or fail to contribute) misleading
+        // unrealized P/L to the safety-brake decision.
+        if (acc.position && s && s.price && isFreshState(s)) {
+          const p = acc.position;
+          const movePct = p.side === "Long" ? (s.price - p.entry) / p.entry : (p.entry - s.price) / p.entry;
+          totalUnreal += movePct * p.notional;
         }
       });
     });
-    const drawdownPct = deployedMargin ? (totalUnreal / deployedMargin) * 100 : 0;
-    engine.lastCircuitBasis = { deployedMargin, totalUnreal, drawdownPct };
+    const drawdownPct = totalCapital ? (totalUnreal / totalCapital) * 100 : 0;
+    // v33 fix: store the actual denominator and $ trigger point so the UI can
+    // show them plainly — an 8% threshold means something very different
+    // depending on whether it's measured against $600 of actually-deployed
+    // margin or $18,000 of theoretical total capital across every strategy
+    // and coin. Previously invisible; now always available to display.
+    engine.lastCircuitBreakerCheck = {
+      totalCapital, totalUnreal, drawdownPct,
+      triggerLossAmount: totalCapital * (engine.circuitBreakerPct / 100),
+    };
     if (drawdownPct <= -engine.circuitBreakerPct) {
       let n = 0;
       BOTS.forEach(bot => {
-        Object.keys(engine.bots[bot.key].coins || {}).forEach(coin => {
+        // v32 fix: no toggle check — if the breaker fires, EVERY open position
+        // must close, including a toggled-off strategy's. A real risk event
+        // shouldn't leave positions unprotected just because new entries for
+        // that strategy happened to be disabled.
+        coinList.forEach(coin => {
           const acc = engine.bots[bot.key].coins[coin];
-          const s = state[coin] || wideState[coin];
-          if (acc && acc.position && s && s.price) {
-            closeFullPosition(acc, acc.position, s.price, "Circuit breaker", Date.now(), engine, { dataQuality: "live_price" });
+          const s = state[coin];
+          // v37 fix (item 10): a position on a stale-state coin can't be
+          // safely closed at an untrustworthy price — it survives this
+          // breaker event uncounted, and Phase 1 (which always runs
+          // regardless of halted) will manage it correctly once state is
+          // fresh again on a later refresh.
+          if (acc && acc.position && s && s.price && isFreshState(s)) {
+            closeFullPosition(acc, acc.position, s.price, "Circuit breaker", Date.now(), engine);
             n++;
           }
         });
       });
       engine.halted = true;
       engine.haltedAt = Date.now();
-      logEngineEvent(`CIRCUIT BREAKER: open losses hit ${drawdownPct.toFixed(1)}% of deployed margin. Closed ${n} positions and halted trading.`);
+      logEngineEvent(`CIRCUIT BREAKER: open losses hit ${drawdownPct.toFixed(1)}% of capital. Closed ${n} positions and halted trading.`);
     }
   }
-  if (engine.halted) { saveEngine(); return; } // no new entries while halted
 
-  BOTS.forEach(bot => {
-    if (!toggles[bot.key]) return; // toggle blocks NEW entries only; lifecycle already ran above
-    coinList.forEach(coin => {
-      const acc = engine.bots[bot.key].coins[coin];
-      const s = state[coin];
-      if (!acc || !s || s.price === null || !s.indicators) return;
+  // v37 fix: PHASE 3 — evaluate NEW entries only after Phase 1 (reconcile)
+  // and the protection block above are FULLY complete, and skipped entirely
+  // if the circuit breaker just fired — a portfolio already past the breaker
+  // threshold must not open fresh trades in the same tick it halts.
+  if (!engine.halted) {
+    await Promise.all(BOTS.map(async (bot) => {
+      await Promise.all(coinList.map(async (coin) => {
+        const acc = engine.bots[bot.key].coins[coin];
+        const s = state[coin];
+        if (!acc || !s || s.price === null || !s.indicators) return;
+        // v37 fix (item 10): new entries now require genuinely fresh state —
+        // previously a coin whose fetch had been failing for minutes could
+        // still open a trade using its last-known (stale) price/indicators
+        // as if they were current.
+        if (!isFreshState(s)) return;
+        if (acc.position) return; // already open — Phase 1 handles existing positions
+        if (!toggles[bot.key]) return; // toggle blocks NEW entries only
 
-      if (acc.position) return;
-      {
         const sig = botSignal(bot.key, s.indicators);
         let side = null;
         if (sig === "bull") side = "Long";
@@ -1183,77 +1402,15 @@ async function runEngineStep() {
             if (beyond) hypTarget = structCeil;
           }
         }
+        // v34 fix: blocked-entry shadows only ever tracked would-win/would-
+        // lose, with no dollar value — a 75% would-win rate can still be
+        // economically poor if winners are tiny and losses large. Compute a
+        // hypothetical notional the same way a real entry would (same
+        // leverage/risk-cap formula), so every shadow can carry a genuine
+        // hypothetical P/L once resolved, not just continuation ones.
         const hypNotionalFromLeverage = acc.cash * engine.leverage;
-        const hypRiskCapFraction = 0.20;
-        const hypNotionalFromRiskCap = hypStopDistPct ? (acc.cash * hypRiskCapFraction) / hypStopDistPct : 0;
-        const hypNotional = hypStopDistPct ? Math.min(hypNotionalFromLeverage, hypNotionalFromRiskCap) : 0;
-
-        function collectCandidateVetoes() {
-          const fails = [];
-          const add = (type, reason) => { if (!fails.some(x => x.type === type)) fails.push({ type, reason }); };
-          const cooldownMin = engine.cooldownMinutes !== undefined ? engine.cooldownMinutes : 45;
-          if (cooldownMin > 0 && acc.cooldownUntil && acc.cooldownUntil[side] && Date.now() < acc.cooldownUntil[side]) add("cooldown_active", "cooldown still active");
-          if (acc.lastClose && acc.lastClose[side] && acc.lastClose[side].result === "Loss" && acc.lastClose[side].snapshot) {
-            const hoursSinceLoss = (Date.now() - acc.lastClose[side].time) / 3600000;
-            if (hoursSinceLoss < 6) {
-              const prev = acc.lastClose[side].snapshot;
-              const curRegime = (bot.key !== "rsi" && bot.key !== "boll") ? coinRegime(s) : "exempt";
-              const curMacdSign = s.indicators.macd.hist > 0 ? "pos" : "neg";
-              const prevMacdSign = prev.macdHist > 0 ? "pos" : "neg";
-              const curRsiBand = s.indicators.rsi.value < 30 ? "low" : s.indicators.rsi.value > 70 ? "high" : "mid";
-              const prevRsiBand = prev.rsi < 30 ? "low" : prev.rsi > 70 ? "high" : "mid";
-              if (curRegime === prev.regime && curMacdSign === prevMacdSign && curRsiBand === prevRsiBand) add("reentry_unchanged", "evidence unchanged since last losing exit");
-            }
-          }
-          if (engine.useRegimeFilter !== false && bot.key !== "rsi" && bot.key !== "boll") {
-            const reg = stableRegimeByCoin[coin] || "mixed";
-            if (reg === "mixed" || (reg === "bull" && side !== "Long") || (reg === "bear" && side !== "Short")) add("regime_gate", `stable regime ${reg} does not permit ${side}`);
-          }
-          if (bot.key === "rsi" || bot.key === "boll") {
-            const permission = checkMeanReversionPermission(s, side, true);
-            const confirmKey = `${bot.key}_${coin}_${side}`;
-            const rec = engine.reversalConfirm && engine.reversalConfirm[confirmKey];
-            const prevCount = rec && typeof rec === "object" ? (rec.count || 0) : 0;
-            const prevTime = rec && typeof rec === "object" ? rec.lastCandleTime : null;
-            const nextCount = permission.allowed && s.lastCompletedCandleTime !== prevTime ? prevCount + 1 : prevCount;
-            if (!permission.allowed || nextCount < 2) add("reversal_unconfirmed", permission.allowed ? "reversal needs another completed candle" : permission.reason);
-          }
-          if (engine.useVolumeFilter && s.volRatio != null && s.volRatio < 0.8) add("thin_volume", `completed-candle volume ${s.volRatio.toFixed(2)}x`);
-          if (engine.maxSameDirection) {
-            const sameDir = Object.values(engine.bots[bot.key].coins || {}).filter(a => a && a.position && a.position.side === side).length;
-            if (sameDir >= engine.maxSameDirection) add("exposure_cap", `${sameDir} same-direction positions already open`);
-          }
-          const hist = s.indicators.macd.hist, histPrev = s.indicators.macd.histPrev;
-          if (bot.key === "rsi" || bot.key === "boll") {
-            const reg = coinRegime(s), roc = fastROC(s.closes);
-            if ((side === "Short" && reg === "bull" && roc != null && roc >= 2.5) || (side === "Long" && reg === "bear" && roc != null && roc <= -2.5)) add("severe_contradiction", "strong opposing regime + acceleration");
-          }
-          if (["sma","macd","donchian"].includes(bot.key) && hist != null && histPrev != null) {
-            if ((side === "Long" && hist < 0 && hist < histPrev) || (side === "Short" && hist > 0 && hist > histPrev)) add("severe_contradiction", "MACD strongly accelerating against trade");
-          }
-          if (["sma","macd"].includes(bot.key) && s.positionInRange !== undefined) {
-            if ((side === "Long" && s.positionInRange > 0.80) || (side === "Short" && s.positionInRange < 0.20)) add("late_entry", "fixed range-position chasing rule failed");
-          }
-          if (["sma","macd"].includes(bot.key) && hist != null && histPrev != null) {
-            if ((side === "Long" && hist <= histPrev) || (side === "Short" && hist >= histPrev)) add("weak_momentum", "momentum not strengthening");
-          }
-          if (!hypStop || hypStop === hypEntry || !hypStopDistPct) add("invalid_plan", "no usable stop plan");
-          else if (hypStopDistPct < 0.012) add("stop_too_tight", `stop distance ${(hypStopDistPct*100).toFixed(2)}% below 1.2% minimum`);
-          if (!(hypNotional > 0)) add("invalid_plan", "calculated notional/margin is not positive");
-          if (hypTarget != null && hypStopDistPct) {
-            const dist = Math.abs(hypTarget - hypEntry) / hypEntry;
-            if (dist < hypStopDistPct * 0.8) add("target_capped", "post-structure reward too small versus risk");
-            if (hypNotional > 0) {
-              const q = hypNotional / hypEntry;
-              const expectedGross = dist * hypNotional;
-              const expectedFees = hypNotional * engine.feePct + (q * hypTarget) * engine.feePct;
-              if ((expectedGross - expectedFees) < (engine.minProfit !== undefined ? engine.minProfit : 15)) add("below_min_profit", "expected net profit below minimum");
-            }
-            if (s.avgDailyRangePct && dist > s.avgDailyRangePct * 1.2) add("target_infeasible", "target exceeds 1.2x recent average daily range");
-          }
-          return fails;
-        }
-        const candidateAudit = collectCandidateVetoes();
+        const hypNotionalFromRiskCap = hypStopDistPct ? (acc.cash * 0.20) / hypStopDistPct : hypNotionalFromLeverage;
+        const hypNotional = Math.min(hypNotionalFromLeverage, hypNotionalFromRiskCap);
 
         // Shared logger: call at every rejection point with the specific
         // veto type + reason. Records both the counter (existing v28 system)
@@ -1270,18 +1427,11 @@ async function runEngineStep() {
           const key = `${vetoType}_${bot.key}_${coin}_${side}`;
           if (!engine.lastBlockLog) engine.lastBlockLog = {};
           const last = engine.lastBlockLog[key] || 0;
-          const BLOCK_THROTTLE_MS = 20 * 60000;
+          const BLOCK_THROTTLE_MS = 20 * 60000; // one log per genuinely new 20-min episode
           if (Date.now() - last < BLOCK_THROTTLE_MS) return;
           engine.lastBlockLog[key] = Date.now();
-          const allFails = candidateAudit.length ? candidateAudit.slice() : [{ type: vetoType, reason }];
-          if (!allFails.some(x => x.type === vetoType)) allFails.unshift({ type: vetoType, reason });
-          const uniqueTypes = [...new Set(allFails.map(x => x.type))];
-          const wouldTradeIfRemoved = uniqueTypes.length === 1 && uniqueTypes[0] === vetoType;
-          const note = wouldTradeIfRemoved ? " [SOLE GLOBAL VETO]" : ` [MULTI-VETO: ${uniqueTypes.join(", ")}]`;
-          const finalReason = reason + note;
-          const meta = { failedVetoes: allFails, wouldTradeIfRemoved, notional: hypNotional, quantity: hypNotional && hypEntry ? hypNotional / hypEntry : null, feePct: engine.feePct, maxHoldMs: (engine.maxHoldHours || 24) * 3600000 };
-          recordVeto(vetoType, bot.key, coin, finalReason, meta);
-          addShadowTrade(bot.key, coin, side, hypEntry, hypStop, hypTarget, finalReason, vetoType, meta);
+          recordVeto(vetoType, bot.key, coin, reason);
+          addShadowTrade(bot.key, coin, side, hypEntry, hypStop, hypTarget, reason, vetoType, null, hypNotional, engine.feePct);
         }
 
         // Re-entry cooldown: confirmed bug where ZEC re-entered long 7 times in
@@ -1336,27 +1486,32 @@ async function runEngineStep() {
 
         // v29: RSI/Bollinger no longer get a free pass — they must earn
         // permission via checkMeanReversionPermission above, AND that
-        // permission must hold for 2 consecutive checks (~30-60s) before
-        // entering, same "one reading isn't enough" principle used elsewhere.
+        // permission must hold for 2 consecutive checks before entering,
+        // same "one reading isn't enough" principle used elsewhere.
+        // v34 fix: same fix as trend regime stability — was using the
+        // CURRENTLY FORMING candle's timestamp, so "confirmed across a
+        // candle boundary" could mean a new candle started seconds ago, not
+        // that a full candle actually closed. Now uses the last CLOSED
+        // candle (length-2) — genuine confirmed-candle-close confirmation.
         if (bot.key === "rsi" || bot.key === "boll") {
-          const permission = checkMeanReversionPermission(s, side, true);
+          const permission = checkMeanReversionPermission(s, side);
           const confirmKey = `${bot.key}_${coin}_${side}`;
           if (!engine.reversalConfirm) engine.reversalConfirm = {};
-          let rec = engine.reversalConfirm[confirmKey];
-          if (!rec || typeof rec !== "object") rec = { count: 0, lastCandleTime: null };
+          const lastClosedCandleTime = (s.times && s.times.length >= 2) ? s.times[s.times.length - 2] : null;
           if (!permission.allowed) {
-            rec = { count: 0, lastCandleTime: s.lastCompletedCandleTime };
-            engine.reversalConfirm[confirmKey] = rec;
+            engine.reversalConfirm[confirmKey] = { count: 0, lastCandleTime: null };
             blockCandidate("reversal_unconfirmed", permission.reason);
             return;
           }
-          if (s.lastCompletedCandleTime != null && s.lastCompletedCandleTime !== rec.lastCandleTime) {
-            rec.count = (rec.count || 0) + 1;
-            rec.lastCandleTime = s.lastCompletedCandleTime;
+          const prevConfirm = engine.reversalConfirm[confirmKey];
+          if (prevConfirm && prevConfirm.count > 0 && lastClosedCandleTime !== null && lastClosedCandleTime !== prevConfirm.lastCandleTime) {
+            engine.reversalConfirm[confirmKey] = { count: prevConfirm.count + 1, lastCandleTime: lastClosedCandleTime };
+          } else if (!prevConfirm || !prevConfirm.count) {
+            engine.reversalConfirm[confirmKey] = { count: 1, lastCandleTime: lastClosedCandleTime };
           }
-          engine.reversalConfirm[confirmKey] = rec;
-          if (rec.count < 2) {
-            blockCandidate("reversal_unconfirmed", "Reversal setup valid on a completed candle — needs a second distinct completed candle before entry");
+          // else: same closed candle as last check — don't inflate the count
+          if (engine.reversalConfirm[confirmKey].count < 2) {
+            blockCandidate("reversal_unconfirmed", "Reversal setup looks valid — needs to hold across a fully-closed candle before entering (confirmed-candle confirmation)");
             return;
           }
         }
@@ -1371,11 +1526,18 @@ async function runEngineStep() {
         // Correlation / exposure cap: crypto moves together, so 30 longs across
         // 15 coins is really one big bet, not 30 diversified ones. Limit how many
         // positions any single strategy can hold in the same direction at once.
+        // v32 fix: this used to only log to the scrolling event text, bypassing
+        // the veto/shadow pipeline entirely — meaning we had zero data on
+        // whether the cap was helping (blocking real losers) or hurting
+        // (blocking correlated winners). Now measured like everything else.
         if (engine.maxSameDirection) {
-          const sameDir = Object.values(engine.bots[bot.key].coins || {}).filter(a2 => a2 && a2.position && a2.position.side === side).length;
+          let sameDir = 0;
+          coinList.forEach(c2 => {
+            const a2 = engine.bots[bot.key].coins[c2];
+            if (a2 && a2.position && a2.position.side === side) sameDir++;
+          });
           if (sameDir >= engine.maxSameDirection) {
-            logEngineEvent(`${bot.label} blocked from opening ${side} ${coin} — already at the ${engine.maxSameDirection}-position exposure cap.`);
-            blockCandidate("exposure_cap", `Blocked by exposure cap — ${sameDir} ${side.toLowerCase()} positions already open for ${bot.label}`);
+            blockCandidate("exposure_cap", `${side} vetoed: already at the ${engine.maxSameDirection}-position exposure cap for this strategy+direction`);
             return;
           }
         }
@@ -1399,58 +1561,45 @@ async function runEngineStep() {
           }
         }
 
-        // v29 hard veto, trend bots (SMA/MACD/Donchian) only: check against ONE
-        // specific, relevant contradiction — MACD momentum fading or reversing
-        // hard against the proposed direction — rather than requiring every
-        // indicator to agree. Deliberately narrow: this is a strategy-relevant
-        // sanity check, not a universal consensus rule, so each strategy can
-        // still behave differently and the comparison stays meaningful.
+        // v32 fix: pre-compute all three trend-bot checks as pure booleans
+        // BEFORE acting on any of them. Previously, whichever fired first got
+        // blamed alone — a "late_entry" shadow proved what price did
+        // afterward, but never proved the trade would have opened if THAT
+        // check alone were removed, since another one in this group might
+        // have also failed. Now each blocked candidate honestly states
+        // whether it was the sole reason or part of a group.
+        let contradictionFails = false, lateEntryFails = false, weakMomentumFails = false;
+        let contradictionReason = "", lateEntryReason = "", weakMomentumReason = "";
         if (["sma", "macd", "donchian"].includes(bot.key)) {
           const hist = s.indicators.macd.hist, histPrev = s.indicators.macd.histPrev;
           if (hist !== null && histPrev !== null) {
-            const momentumStronglyAgainstLong = side === "Long" && hist < 0 && hist < histPrev; // negative AND getting more negative
-            const momentumStronglyAgainstShort = side === "Short" && hist > 0 && hist > histPrev; // positive AND getting more positive
-            if (momentumStronglyAgainstLong || momentumStronglyAgainstShort) {
-              blockCandidate("severe_contradiction", `${side} vetoed: MACD momentum is both against the trade and accelerating (hist ${hist.toFixed(3)} vs ${histPrev.toFixed(3)} ~45min ago)`);
-              return;
-            }
+            const momentumStronglyAgainstLong = side === "Long" && hist < 0 && hist < histPrev;
+            const momentumStronglyAgainstShort = side === "Short" && hist > 0 && hist > histPrev;
+            contradictionFails = momentumStronglyAgainstLong || momentumStronglyAgainstShort;
+            contradictionReason = `${side} vetoed: MACD momentum is both against the trade and accelerating (hist ${hist.toFixed(3)} vs ${histPrev.toFixed(3)} ~45min ago)`;
           }
         }
-
-        // v29: trend late-entry/chasing protection. A correct direction with
-        // a bad entry (most of the move already used up) is still a bad
-        // trade. If price is already sitting near the top of its recent
-        // range on a Long (or bottom on a Short), there's little room left
-        // and the entry is likely chasing a move that's mostly over.
-        // Donchian is deliberately excluded — its entire thesis IS price
-        // breaking the recent range extreme, so this condition is its valid
-        // signal, not chasing. Applying this check there would veto every
-        // genuine Donchian entry.
         if (["sma", "macd"].includes(bot.key) && s.positionInRange !== undefined) {
           const chasingLong = side === "Long" && s.positionInRange > 0.80;
           const chasingShort = side === "Short" && s.positionInRange < 0.20;
-          if (chasingLong || chasingShort) {
-            blockCandidate("late_entry", `${side} vetoed: price already ${(s.positionInRange*100).toFixed(0)}% up its recent range — little room left, likely chasing an extended move`);
-            return;
-          }
+          lateEntryFails = chasingLong || chasingShort;
+          lateEntryReason = `${side} vetoed: price already ${(s.positionInRange*100).toFixed(0)}% up its recent range — little room left, likely chasing an extended move`;
         }
-
-        // v29: momentum slope requirement (SMA/MACD only — Donchian's thesis is
-        // price structure, not momentum, so leaving it untouched keeps that
-        // comparison meaningful). Sign alone isn't enough — require the
-        // histogram to actually be strengthening in the trade's favor, not
-        // just barely positive/negative while fading.
         if (["sma", "macd"].includes(bot.key)) {
           const hist = s.indicators.macd.hist, histPrev = s.indicators.macd.histPrev;
           if (hist !== null && histPrev !== null) {
             const weakeningLong = side === "Long" && hist <= histPrev;
             const weakeningShort = side === "Short" && hist >= histPrev;
-            if (weakeningLong || weakeningShort) {
-              blockCandidate("weak_momentum", `${side} vetoed: MACD sign supports the trade but momentum is fading, not strengthening (hist ${hist.toFixed(3)} vs ${histPrev.toFixed(3)} ~45min ago)`);
-              return;
-            }
+            weakMomentumFails = weakeningLong || weakeningShort;
+            weakMomentumReason = `${side} vetoed: MACD sign supports the trade but momentum is fading, not strengthening (hist ${hist.toFixed(3)} vs ${histPrev.toFixed(3)} ~45min ago)`;
           }
         }
+        const trioFailCount = [contradictionFails, lateEntryFails, weakMomentumFails].filter(Boolean).length;
+        const soleVetoNote = trioFailCount > 1 ? ` [NOT sole veto — ${trioFailCount} of 3 related checks failed together, so removing just this one may not have let the trade through]` : (trioFailCount === 1 ? " [sole veto among this check group — removing just this one would likely have let it through]" : "");
+
+        if (contradictionFails) { blockCandidate("severe_contradiction", contradictionReason + soleVetoNote); return; }
+        if (lateEntryFails) { blockCandidate("late_entry", lateEntryReason + soleVetoNote); return; }
+        if (weakMomentumFails) { blockCandidate("weak_momentum", weakMomentumReason + soleVetoNote); return; }
 
         const entry = s.price;
         // ATR-based stop (Turtle "2N"): stop distance scales with each coin's own
@@ -1463,15 +1612,15 @@ async function runEngineStep() {
         } else {
           stop = side === "Long" ? s.buyZoneLow : s.sellZoneHigh; // fallback
         }
-        if (!stop || stop === entry) { blockCandidate("invalid_plan", "Vetoed: no usable stop plan could be constructed"); return; }
+        if (!stop || stop === entry) return;
         const stopDistPct = Math.abs(entry - stop) / entry;
-        if (stopDistPct < 0.012) { blockCandidate("stop_too_tight", `Vetoed: stop distance ${(stopDistPct*100).toFixed(2)}% is below the 1.2% minimum`); return; }
+        if (stopDistPct < 0.012) { blockCandidate("stop_too_tight", `Vetoed: stop distance only ${(stopDistPct*100).toFixed(2)}% — too tight to be a meaningful risk boundary`); return; } // require at least ~1.2% room to the stop
 
         // Base target: 2.5x the stop distance.
         let target = side === "Long" ? entry * (1 + stopDistPct * 2.5) : entry * (1 - stopDistPct * 2.5);
 
         // v29: support/resistance ceiling on targets. A target manufactured
-        // purely from a fixed R:R multiple can sit beyond 24h close-range resistance/
+        // purely from a fixed R:R multiple can sit beyond real resistance/
         // support with no evidence price can actually get there. Cap it at
         // that boundary. Donchian is exempt — its entire thesis IS price
         // breaking beyond exactly that boundary, so capping it there would
@@ -1487,9 +1636,9 @@ async function runEngineStep() {
         // capped) target, not the original fixed 2.5x assumption.
         const actualTargetDistPct = Math.abs(target - entry) / entry;
         if (actualTargetDistPct < stopDistPct * 0.8) {
-          // Capping to 24h close-range structure left too little reward to justify the
+          // Capping to real structure left too little reward to justify the
           // risk — reject rather than take a trade with poor real economics.
-          blockCandidate("target_capped", `After capping to 24h close-range structure, reward (${(actualTargetDistPct*100).toFixed(2)}%) no longer justifies the risk (${(stopDistPct*100).toFixed(2)}%)`);
+          blockCandidate("target_capped", `After capping to real structure, reward (${(actualTargetDistPct*100).toFixed(2)}%) no longer justifies the risk (${(stopDistPct*100).toFixed(2)}%)`);
           return;
         }
 
@@ -1498,13 +1647,12 @@ async function runEngineStep() {
         const notionalFromRiskCap = (acc.cash * riskCapFraction) / stopDistPct;
         const notional = Math.min(notionalFromLeverage, notionalFromRiskCap);
         const margin = notional / engine.leverage;
-        if (margin <= 0) { blockCandidate("invalid_plan", "Vetoed: calculated margin was not positive"); return; }
+        if (margin <= 0) return;
 
         // Minimum-profit filter: if hitting target wouldn't clear a worthwhile
         // amount after fees, the setup isn't worth the risk — skip it.
         const expectedGross = actualTargetDistPct * notional;
-        const quantityForPlan = notional / entry;
-        const expectedFees = (notional * engine.feePct) + (quantityForPlan * target * engine.feePct);
+        const expectedFees = notional * engine.feePct * 2;
         const expectedNet = expectedGross - expectedFees;
         const minProfit = engine.minProfit !== undefined ? engine.minProfit : 15;
         if (expectedNet < minProfit) { blockCandidate("below_min_profit", `Vetoed: expected profit $${expectedNet.toFixed(2)} is below the $${minProfit} minimum`); return; }
@@ -1515,7 +1663,7 @@ async function runEngineStep() {
         const tp3MovePct = actualTargetDistPct;
         const avgDailyRangePct = s.avgDailyRangePct;
         if (avgDailyRangePct && tp3MovePct > avgDailyRangePct * 1.2) {
-          blockCandidate("target_infeasible", `Target needs a ${(tp3MovePct*100).toFixed(1)}% move but ${coin} typically ranges ${(avgDailyRangePct*100).toFixed(1)}%/day`);
+          blockCandidate("target_infeasible", `Target needs a ${(tp3MovePct*100).toFixed(1)}% move but ${coin} typically ranges ${(avgDailyRangePct*100).toFixed(1)}%/day (based on ${s.dailyRangeDaysUsed || "?"} day${s.dailyRangeDaysUsed === 1 ? "" : "s"} of data)`);
           return;
         }
 
@@ -1579,31 +1727,51 @@ async function runEngineStep() {
           }
         }
 
+        // v36 fix: re-check the exposure cap right here, immediately before
+        // committing — the earlier check (much higher up) reads a snapshot
+        // that could go stale if another coin for this same bot+direction
+        // gets evaluated concurrently in between (the async conversion means
+        // execution can interleave at any await point elsewhere in the
+        // flow). This is the last moment before the position is real, so
+        // it's the count that actually matters.
+        if (engine.maxSameDirection) {
+          let sameDirNow = 0;
+          coinList.forEach(c2 => {
+            const a2 = engine.bots[bot.key].coins[c2];
+            if (a2 && a2.position && a2.position.side === side) sameDirNow++;
+          });
+          if (sameDirNow >= engine.maxSameDirection) {
+            blockCandidate("exposure_cap", `${side} vetoed at final check: another concurrent entry already reached the ${engine.maxSameDirection}-position exposure cap first`);
+            return;
+          }
+        }
+
         acc.cash -= margin;
         if (bot.key === "rsi" || bot.key === "boll") {
-          if (engine.reversalConfirm) engine.reversalConfirm[`${bot.key}_${coin}_${side}`] = 0;
+          if (engine.reversalConfirm) engine.reversalConfirm[`${bot.key}_${coin}_${side}`] = { count: 0, lastCandleTime: null };
         }
         acc.position = {
           coin, bot: bot.key, side, entry, stop, target, entryScore,
-          leverage: engine.leverage, margin, notional, expectedNet, quantity: notional / entry,
+          leverage: engine.leverage, margin, notional, expectedNet,
+          quantity: notional / entry, // v32: fixed at entry — exit fee should scale with quantity × exit price, not reuse entry notional
           riskReward: rr, reason: reasonText, openedAt: Date.now(),
-          maxHoldMs: (engine.maxHoldHours || 24) * 3600000, expiryTime: Date.now() + (engine.maxHoldHours || 24) * 3600000,
-          universeSource: (typeof autoAdded !== "undefined" && autoAdded[coin]) ? "scanner_auto" : "tracked",
           concurrentOpen, concurrentLong, concurrentShort, entrySnapshot, sameCoinSameSideOtherBots,
           maePct: 0, mfePct: 0, // running worst/best excursion, updated on every exit-check scan
         };
-      }
-    });
-  });
+    }));
+  }));
+  } // closes: if (!engine.halted) { ... Phase 3 ... }
+
+
   saveEngine();
 }
 function accEquity(acc) { return acc.position ? acc.cash + acc.position.margin : acc.cash; }
 // Running log of notable engine events (regime flips, circuit breaker, halts)
-let engineEvents = JSON.parse(localStorage.getItem("cg33_events") || "[]");
+let engineEvents = JSON.parse(localStorage.getItem("tm2_events") || "[]");
 function logEngineEvent(msg) {
   engineEvents.unshift({ t: Date.now(), msg });
   engineEvents = engineEvents.slice(0, 30);
-  localStorage.setItem("cg33_events", JSON.stringify(engineEvents));
+  localStorage.setItem("tm2_events", JSON.stringify(engineEvents));
 }
 
 // v28: Counter-check system. Every hard veto increments a structured counter
@@ -1614,31 +1782,23 @@ function logEngineEvent(msg) {
 // BOTH this and addShadowTrade together — previously this had its own
 // 10-min throttle but addShadowTrade had none at all, so shadow trades kept
 // logging every ~30s regardless, which is what actually filled the array.
-let vetoLog = JSON.parse(localStorage.getItem("cg33_vetoes") || "[]");
-function ensureVetoTotals() {
-  if (!engine) return {};
-  if (engine.vetoTotals && Object.keys(engine.vetoTotals).length) return engine.vetoTotals;
-  const totals = {};
+let vetoLog = JSON.parse(localStorage.getItem("tm2_vetoes") || "[]");
+function recordVeto(vetoType, bot, coin, reason) {
+  vetoLog.unshift({ t: Date.now(), type: vetoType, bot, coin, reason });
+  vetoLog = vetoLog.slice(0, 500); // keep enough history for the report, cap growth
+  localStorage.setItem("tm2_vetoes", JSON.stringify(vetoLog));
+}
+function vetoSummary() {
+  const counts = {};
   vetoLog.forEach(v => {
-    if (!totals[v.type]) totals[v.type] = { n: 0, byBot: {}, byCoin: {} };
-    const d = totals[v.type]; d.n++;
-    d.byBot[v.bot] = (d.byBot[v.bot] || 0) + 1;
-    d.byCoin[v.coin] = (d.byCoin[v.coin] || 0) + 1;
+    const key = v.type;
+    if (!counts[key]) counts[key] = { n: 0, byBot: {}, byCoin: {} };
+    counts[key].n++;
+    counts[key].byBot[v.bot] = (counts[key].byBot[v.bot] || 0) + 1;
+    counts[key].byCoin[v.coin] = (counts[key].byCoin[v.coin] || 0) + 1;
   });
-  engine.vetoTotals = totals;
-  return totals;
+  return counts;
 }
-function recordVeto(vetoType, bot, coin, reason, meta = {}) {
-  const totals = ensureVetoTotals();
-  if (!totals[vetoType]) totals[vetoType] = { n: 0, byBot: {}, byCoin: {} };
-  const d = totals[vetoType]; d.n++;
-  d.byBot[bot] = (d.byBot[bot] || 0) + 1;
-  d.byCoin[coin] = (d.byCoin[coin] || 0) + 1;
-  vetoLog.unshift({ t: Date.now(), type: vetoType, bot, coin, reason, ...meta });
-  vetoLog = vetoLog.slice(0, 1000);
-  localStorage.setItem("cg33_vetoes", JSON.stringify(vetoLog));
-}
-function vetoSummary() { return ensureVetoTotals(); }
 
 // v30: Shadow trade tracking. Every BLOCKED candidate gets a hypothetical
 // position recorded with the exact entry/stop/target it would have used, then
@@ -1653,163 +1813,349 @@ function vetoSummary() { return ensureVetoTotals(); }
 // kind entirely (confirmed: a report showed 11 of 12 regime-flip
 // continuations missing, evicted by blocked-entry volume before they had a
 // chance to resolve). Now structurally impossible.
-let shadowTrades = JSON.parse(localStorage.getItem("cg33_shadow") || "[]"); // blocked entries
-let continuationShadows = JSON.parse(localStorage.getItem("cg33_continuation") || "[]"); // early-exit/regime-flip
+let shadowTrades = JSON.parse(localStorage.getItem("tm2_shadow") || "[]"); // blocked entries
+let continuationShadows = JSON.parse(localStorage.getItem("tm2_continuation") || "[]"); // early-exit/regime-flip
 
-function addShadowTrade(botKey, coin, side, entry, stop, target, reason, vetoType, meta = {}) {
-  if (entry == null || stop == null || target == null) return;
-  const createdAt = meta.t || Date.now();
-  const maxHoldMs = meta.maxHoldMs || ((engine && engine.maxHoldHours ? engine.maxHoldHours : 24) * 3600000);
+// v33 fix: trimming was blind FIFO by recency (oldest slot dropped first,
+// regardless of status) — a still-PENDING shadow near the cap could get
+// evicted before it ever resolved, silently losing the exact research data
+// this system exists to produce. Now evicts the oldest RESOLVED entries
+// first; a pending one is only ever dropped if pending entries alone exceed
+// the cap, which should never realistically happen.
+function trimShadowArray(arr, cap) {
+  if (arr.length <= cap) return arr;
+  const pending = arr.filter(x => x.status === "pending");
+  const resolved = arr.filter(x => x.status !== "pending");
+  const keepResolved = resolved.slice(0, Math.max(0, cap - pending.length));
+  const merged = pending.concat(keepResolved);
+  merged.sort((a, b) => b.t - a.t); // keep newest-first ordering
+  return merged.slice(0, cap);
+}
+
+function addShadowTrade(botKey, coin, side, entry, stop, target, reason, vetoType, actualPnl, notional, feePct) {
+  if (entry == null || stop == null || target == null) return; // incomplete plan (e.g. no ATR yet) — nothing to track
   const record = {
-    id: createdAt + Math.random(), t: createdAt, bot: botKey, coin, side,
+    id: Date.now() + Math.random(), t: Date.now(), bot: botKey, coin, side,
     entry, stop, target, reason, vetoType,
     status: "pending", resolution: null, resolvedAt: null, resolvedPrice: null,
-    maePct: 0, mfePct: 0, hypotheticalPnl: null, grossPnl: null, fees: null,
-    notional: meta.notional != null ? meta.notional : null,
-    quantity: meta.quantity != null ? meta.quantity : null,
-    feePct: meta.feePct != null ? meta.feePct : (engine ? engine.feePct : 0.001),
-    failedVetoes: meta.failedVetoes || [], wouldTradeIfRemoved: meta.wouldTradeIfRemoved === true,
-    maxHoldMs, expiryTime: meta.expiryTime || (createdAt + maxHoldMs),
-    actualPnl: meta.actualPnl != null ? meta.actualPnl : null,
-    dataQuality: null, classification: null, deltaVsActual: null,
+    maxHoldMs: (engine && engine.maxHoldHours ? engine.maxHoldHours : 24) * 3600000,
+    actualPnl: actualPnl !== undefined ? actualPnl : null,
+    notional: notional !== undefined ? notional : null,
+    feePct: feePct !== undefined ? feePct : null,
   };
   const isContinuation = vetoType === "early_exit_continuation" || vetoType === "regime_flip_continuation";
   if (isContinuation) {
     continuationShadows.unshift(record);
-    continuationShadows = trimShadowArrayPreservePending(continuationShadows, 1000);
-    localStorage.setItem("cg33_continuation", JSON.stringify(continuationShadows));
+    continuationShadows = trimShadowArray(continuationShadows, 1000); // generous — these are rare, should never actually fill
+    localStorage.setItem("tm2_continuation", JSON.stringify(continuationShadows));
   } else {
     shadowTrades.unshift(record);
-    shadowTrades = trimShadowArrayPreservePending(shadowTrades, 2000);
-    localStorage.setItem("cg33_shadow", JSON.stringify(shadowTrades));
+    shadowTrades = trimShadowArray(shadowTrades, 2000);
+    localStorage.setItem("tm2_shadow", JSON.stringify(shadowTrades));
   }
 }
 
 async function resolveShadowArray(arr) {
   let changed = false;
-  for (const st of arr) {
-    if (st.status !== "pending") continue;
-    let s = state[st.coin] || wideState[st.coin];
-    if (!s || !s.times || !s.highs || !s.lows) {
-      try { s = await analyzeCoin(st.coin); wideState[st.coin] = s; } catch (e) { s = null; }
+  await Promise.all(arr.map(async (st) => {
+    if (st.status !== "pending") return;
+    const s = state[st.coin] || wideState[st.coin];
+    if (s && s.times && s.highs && s.lows) {
+      const isLong = st.side === "Long";
+      // v33 fix: same indexing fix as real positions — see comment there.
+      let startIdx = 0;
+      for (let j = 0; j < s.times.length; j++) {
+        if (s.times[j] <= st.t) startIdx = j; else break;
+      }
+      const shadowMaxHoldMs = st.maxHoldMs || (24 * 3600000);
+      const shadowExpiryTime = st.t + shadowMaxHoldMs;
+      for (let i = startIdx; i < s.closes.length; i++) {
+        const isOpeningCandle = (i === startIdx);
+        const candleTime = s.times[i];
+        // v33 fix: same expiry-boundary priority as real positions — a
+        // stop/target touch after the shadow's own holding period should
+        // have expired doesn't get credited, keeping shadow and real trades
+        // comparable under the same rule.
+        // v34 fix: same expiry-boundary fix as real positions — see comment there.
+        if (candleTime + FIFTEEN_MS > shadowExpiryTime) {
+          // v35: try 1-minute data to price the expiry moment precisely,
+          // same as real positions.
+          const oneMin = await resolveWithOneMinute(st.coin, st.side, st.stop, st.target, candleTime, Math.max(candleTime, st.t), shadowExpiryTime);
+          if (oneMin && oneMin.hit === "stop") { st.status = "resolved"; st.resolution = st.openingUncertain ? "ambiguous" : "would_lose"; st.resolvedAt = oneMin.time; st.resolvedPrice = oneMin.price; changed = true; return; }
+          if (oneMin && oneMin.hit === "target") { st.status = "resolved"; st.resolution = st.openingUncertain ? "ambiguous" : "would_win"; st.resolvedAt = oneMin.time; st.resolvedPrice = oneMin.price; changed = true; return; }
+          // v37 fix: same dead-code fix as real positions — now genuinely
+          // uses the last valid 1-minute price/time when available.
+          const priceNearExpiry = (oneMin && oneMin.lastValidPrice !== null) ? oneMin.lastValidPrice : null;
+          const timeNearExpiry = (oneMin && oneMin.lastValidTime !== null) ? oneMin.lastValidTime : shadowExpiryTime;
+          // v38 fix: same uncertain-propagation fix as real positions — a
+          // boundary minute that could have touched a level but with
+          // unknown timing is genuinely ambiguous, not a clean timeout.
+          st.status = "resolved"; st.resolution = ((oneMin && oneMin.hit === "uncertain") || st.openingUncertain) ? "ambiguous" : "would_timeout";
+          st.resolvedAt = timeNearExpiry;
+          st.resolvedPrice = priceNearExpiry !== null ? priceNearExpiry : (i > startIdx ? s.closes[i - 1] : st.entry);
+          changed = true; return;
+        }
+        // v32 fix: same opening-candle contamination fix as real positions —
+        // the candle containing the shadow's creation time can span BEFORE
+        // it too.
+        // v35: tries real 1-minute data from creation time onward first —
+        // only falls back to the live-price proxy if 1m data is unavailable.
+        let hi, lo;
+        if (isOpeningCandle) {
+          const oneMin = await resolveWithOneMinute(st.coin, st.side, st.stop, st.target, candleTime, st.t, candleTime + FIFTEEN_MS);
+          if (oneMin && oneMin.hit === "stop") { st.status = "resolved"; st.resolution = st.openingUncertain ? "ambiguous" : "would_lose"; st.resolvedAt = oneMin.time; st.resolvedPrice = oneMin.price; changed = true; return; }
+          if (oneMin && oneMin.hit === "target") { st.status = "resolved"; st.resolution = st.openingUncertain ? "ambiguous" : "would_win"; st.resolvedAt = oneMin.time; st.resolvedPrice = oneMin.price; changed = true; return; }
+          // v39 fix: counting alone wasn't enough — same fix as real
+          // positions. Flags the shadow itself so whatever it eventually
+          // resolves to gets classified ambiguous, not just counted.
+          if (oneMin && oneMin.hit === "uncertain") {
+            ambiguousCandleCount++; localStorage.setItem("tm2_ambiguous", ambiguousCandleCount);
+            st.openingUncertain = true;
+            // v39.1 fix: without this, the flag only lived in memory — the
+            // shadow was still pending (not yet resolved), so this pass
+            // never triggered a save. A reload before it eventually
+            // resolved would silently lose the flag, and the shadow could
+            // later resolve as a clean would-win/would-lose despite its
+            // genuinely uncertain opening.
+            changed = true;
+          }
+          hi = Math.max(s.price, st.entry); lo = Math.min(s.price, st.entry);
+        } else {
+          hi = s.highs[i]; lo = s.lows[i];
+        }
+        const hitStop = isLong ? lo <= st.stop : hi >= st.stop;
+        const hitTarget = isLong ? hi >= st.target : lo <= st.target;
+        // v35: try 1-minute data first for same-candle SL+TP too, same as
+        // real positions — only falls back to "ambiguous" if 1m can't help.
+        let bothHitCandidate = hitStop && hitTarget && !isOpeningCandle;
+        if (bothHitCandidate) {
+          const oneMin = await resolveWithOneMinute(st.coin, st.side, st.stop, st.target, candleTime, candleTime, candleTime + FIFTEEN_MS);
+          if (oneMin && oneMin.hit === "stop") { st.status = "resolved"; st.resolution = st.openingUncertain ? "ambiguous" : "would_lose"; st.resolvedAt = oneMin.time; st.resolvedPrice = oneMin.price; changed = true; return; }
+          if (oneMin && oneMin.hit === "target") { st.status = "resolved"; st.resolution = st.openingUncertain ? "ambiguous" : "would_win"; st.resolvedAt = oneMin.time; st.resolvedPrice = oneMin.price; changed = true; return; }
+        }
+        const ambiguous = bothHitCandidate;
+        if (ambiguous) { ambiguousCandleCount++; localStorage.setItem("tm2_ambiguous", ambiguousCandleCount); }
+        if (hitStop) { st.status = "resolved"; st.resolution = (ambiguous || st.openingUncertain) ? "ambiguous" : "would_lose"; st.resolvedAt = Math.max(candleTime, st.t); st.resolvedPrice = st.stop; st.ambiguous = ambiguous; changed = true; break; }
+        if (hitTarget) { st.status = "resolved"; st.resolution = st.openingUncertain ? "ambiguous" : "would_win"; st.resolvedAt = Math.max(candleTime, st.t); st.resolvedPrice = st.target; changed = true; break; }
+      }
     }
-    if (!s || !s.times || !s.highs || !s.lows) continue;
-    const expiry = st.expiryTime || (st.t + (st.maxHoldMs || 24 * 3600000));
-    const scanEnd = Math.min(Date.now(), expiry);
-    const path = await inspectPricePath(st.coin, st.side, st.entry, st.stop, st.target, st.t, scanEnd, s, st.maePct || 0, st.mfePct || 0);
-    st.maePct = path.maePct || 0; st.mfePct = path.mfePct || 0; st.dataQuality = path.quality;
-    if (path.outcome === "stop" || path.outcome === "target" || path.outcome === "ambiguous") {
-      st.status = "resolved";
-      st.resolution = path.outcome === "stop" ? "would_lose" : path.outcome === "target" ? "would_win" : "ambiguous";
-      st.resolvedAt = path.eventTime || scanEnd;
-      st.resolvedPrice = path.outcome === "stop" ? st.stop : path.outcome === "target" ? st.target : null;
+    // v32 fix: use the holding-period setting that was ACTUALLY active when
+    // this shadow was created, not a hardcoded 24h — previously this broke
+    // comparability whenever the live max-hold setting wasn't 24h.
+    const maxHoldMs = st.maxHoldMs || (24 * 3600000);
+    if (st.status === "pending" && (Date.now() - st.t) > maxHoldMs) {
+      st.status = "resolved"; st.resolution = "would_timeout";
+      st.resolvedAt = Date.now(); st.resolvedPrice = s ? s.price : null;
       changed = true;
-    } else if (Date.now() >= expiry) {
-      const px = await priceNearTime(st.coin, expiry, s.price);
-      st.status = "resolved"; st.resolution = "would_timeout"; st.resolvedAt = expiry; st.resolvedPrice = px.price; st.dataQuality = px.quality;
-      changed = true;
     }
-    if (st.status === "resolved" && st.resolution !== "ambiguous" && st.resolvedPrice != null && st.notional) {
-      const p = pnlForExit(st.side, st.entry, st.resolvedPrice, st.notional, st.quantity, st.feePct || 0.001);
-      if (p) { st.grossPnl = p.gross; st.fees = p.fees; st.hypotheticalPnl = p.net; }
+    // v39 fix: applied here, once, regardless of which resolution path
+    // fired above — a shadow flagged openingUncertain carries that
+    // uncertainty into whatever it eventually resolved to, same as real
+    // positions. Centralized rather than duplicated at every resolution point.
+    if (st.status === "resolved" && st.openingUncertain && st.resolution !== "ambiguous") {
+      st.resolution = "ambiguous";
     }
-    if (st.status === "resolved" && st.actualPnl != null && st.hypotheticalPnl != null && (st.vetoType === "early_exit_continuation" || st.vetoType === "regime_flip_continuation")) {
-      st.deltaVsActual = st.actualPnl - st.hypotheticalPnl;
-      if (st.actualPnl > 0 && st.deltaVsActual > 0.5) st.classification = "PROFIT_PROTECTION";
-      else if (st.deltaVsActual > 0.5) st.classification = "GOOD_SAVE";
-      else if (st.deltaVsActual < -0.5 && st.hypotheticalPnl > 0) st.classification = "MISSED_WINNER";
-      else if (st.deltaVsActual < -0.5) st.classification = "PREMATURE_EXIT";
-      else st.classification = "NEUTRAL";
-    } else if (st.resolution === "ambiguous") st.classification = "AMBIGUOUS";
-  }
+    // v34 fix: hypothetical dollar P/L now computed for EVERY resolved
+    // shadow with a notional value, not just continuation ones — a blocked
+    // entry's 75% would-win rate can still be economically poor if winners
+    // are tiny and losses large; win/loss counts alone can't show that.
+    // The actual-vs-hypothetical DELTA and classification only apply to
+    // continuation shadows, since only those have a real trade to compare
+    // against — a blocked entry never actually happened.
+    if (st.status === "resolved" && st.notional !== null && st.resolvedPrice !== null) {
+      const isLong = st.side === "Long";
+      const hypMovePct = st.resolution === "would_win"
+        ? (isLong ? (st.target - st.entry) / st.entry : (st.entry - st.target) / st.entry)
+        : st.resolution === "would_lose"
+          ? (isLong ? (st.stop - st.entry) / st.entry : (st.entry - st.stop) / st.entry)
+          : (isLong ? (st.resolvedPrice - st.entry) / st.entry : (st.entry - st.resolvedPrice) / st.entry); // would_timeout
+      const hypGross = hypMovePct * st.notional;
+      // v36 fix: real trade exit fees scale with quantity × exit price (a
+      // v33 fix), but this hypothetical calculation still used notional ×
+      // fee × 2 for both sides — the two engines were using slightly
+      // different fee models, biasing any real-vs-hypothetical comparison.
+      // Now uses the identical formula.
+      const hypQty = st.notional / st.entry;
+      const hypEntryFee = st.notional * (st.feePct || 0.001);
+      const hypExitFee = hypQty * st.resolvedPrice * (st.feePct || 0.001);
+      const hypFees = hypEntryFee + hypExitFee;
+      st.hypotheticalPnl = hypGross - hypFees;
+      // v38 fix: was only checking actualPnl/vetoType, not resolution —
+      // an ambiguous continuation shadow (uncertain stop-like price) could
+      // still get classified GOOD_SAVE/MISSED_WINNER/NEUTRAL from a value
+      // that isn't actually known to be correct.
+      if (st.actualPnl !== null && st.resolution !== "ambiguous" && (st.vetoType === "early_exit_continuation" || st.vetoType === "regime_flip_continuation")) {
+        st.deltaVsActual = st.actualPnl - st.hypotheticalPnl; // positive = the protective exit did better than holding
+        st.classification = st.deltaVsActual > 0.5 ? "GOOD_SAVE" : st.deltaVsActual < -0.5 ? "MISSED_WINNER" : "NEUTRAL";
+      }
+    }
+  }));
   return changed;
 }
 async function resolveShadowTrades() {
-  if (await resolveShadowArray(shadowTrades)) localStorage.setItem("cg33_shadow", JSON.stringify(shadowTrades));
-  if (await resolveShadowArray(continuationShadows)) localStorage.setItem("cg33_continuation", JSON.stringify(continuationShadows));
+  if (await resolveShadowArray(shadowTrades)) localStorage.setItem("tm2_shadow", JSON.stringify(shadowTrades));
+  if (await resolveShadowArray(continuationShadows)) localStorage.setItem("tm2_continuation", JSON.stringify(continuationShadows));
 }
 function shadowSummary() {
-  const all = shadowTrades.concat(continuationShadows);
+  const all = shadowTrades.concat(continuationShadows); // combined view for display only — storage stays separate
   const resolved = all.filter(st => st.status === "resolved");
   const wins = resolved.filter(st => st.resolution === "would_win").length;
   const losses = resolved.filter(st => st.resolution === "would_lose").length;
   const timeouts = resolved.filter(st => st.resolution === "would_timeout").length;
-  const ambiguous = resolved.filter(st => st.resolution === "ambiguous").length;
+  // v34 fix: "ambiguous" resolutions were falling into the catch-all `else`
+  // branch below and getting silently counted as timeouts — now tracked as
+  // its own category, and (matching the real-trade fix above) genuinely
+  // excluded from the would-win-rate calculation rather than just being
+  // relabeled while still counting as a loss.
+  const ambiguousCount = resolved.filter(st => st.resolution === "ambiguous").length;
   const pending = all.filter(st => st.status === "pending").length;
   const byType = {};
   resolved.forEach(st => {
-    if (!byType[st.vetoType]) byType[st.vetoType] = { n: 0, wins: 0, losses: 0, timeouts: 0, ambiguous: 0, net: 0, pnlN: 0, mae: 0, mfe: 0, soleN: 0 };
-    const d = byType[st.vetoType]; d.n++;
-    if (st.resolution === "would_win") d.wins++;
-    else if (st.resolution === "would_lose") d.losses++;
-    else if (st.resolution === "ambiguous") d.ambiguous++;
-    else d.timeouts++;
-    if (st.hypotheticalPnl != null) { d.net += st.hypotheticalPnl; d.pnlN++; }
-    d.mae += st.maePct || 0; d.mfe += st.mfePct || 0;
-    if (st.wouldTradeIfRemoved) d.soleN++;
+    if (!byType[st.vetoType]) byType[st.vetoType] = { n: 0, wins: 0, losses: 0, timeouts: 0, ambiguous: 0, hypNetSum: 0, hypNetCount: 0 };
+    byType[st.vetoType].n++;
+    if (st.resolution === "would_win") byType[st.vetoType].wins++;
+    else if (st.resolution === "would_lose") byType[st.vetoType].losses++;
+    else if (st.resolution === "ambiguous") byType[st.vetoType].ambiguous++;
+    else byType[st.vetoType].timeouts++;
+    // v34: expectancy in dollars, not just win/loss counts — a 75% would-win
+    // rate can still be a poor filter if winners are small and losses large.
+    // v37 fix: ambiguous shadows store a stop-like resolvedPrice, so their
+    // hypotheticalPnl looked like a real loss and biased this sum even
+    // though they're excluded from the win/loss count. Excluded here too.
+    if (st.hypotheticalPnl !== undefined && st.resolution !== "ambiguous") {
+      byType[st.vetoType].hypNetSum += st.hypotheticalPnl;
+      byType[st.vetoType].hypNetCount++;
+    }
   });
-  return { total: all.length, resolved: resolved.length, wins, losses, timeouts, ambiguous, pending, byType };
+  return { total: all.length, resolved: resolved.length, wins, losses, timeouts, ambiguousCount, pending, byType };
 }
 
-function closeFullPosition(acc, p, exitPrice, exitReason, exitTime, engine, options = {}) {
-  const closedAtTime = exitTime || Date.now();
-  const quantity = p.quantity || (p.notional / p.entry);
-  let grossPnl = 0, fees = 0, netPnl = 0;
-  if (!options.neutralizePnl) {
-    const calc = pnlForExit(p.side, p.entry, exitPrice, p.notional, quantity, engine.feePct);
-    grossPnl = calc ? calc.gross : 0; fees = calc ? calc.fees : 0; netPnl = calc ? calc.net : 0;
-  }
+function closeFullPosition(acc, p, exitPrice, exitReason, exitTime, engine) {
+  const movePct = p.side === "Long" ? (exitPrice - p.entry) / p.entry : (p.entry - exitPrice) / p.entry;
+  const grossPnl = movePct * p.notional;
+  // v32 fix: exit fee now scales with quantity × exit price, not the entry
+  // notional reused for both sides. With a fixed quantity, notional value at
+  // exit genuinely differs from notional at entry once price has moved —
+  // reusing entry notional for the exit-side fee was a small but real
+  // approximation that would compound across many trades. Falls back to the
+  // old approximation for any position opened before this fix (no stored
+  // quantity yet).
+  const qty = p.quantity || (p.notional / p.entry);
+  const entryFee = p.notional * engine.feePct;
+  const exitFee = qty * exitPrice * engine.feePct;
+  const fees = entryFee + exitFee;
+  const netPnl = grossPnl - fees;
   acc.cash += p.margin + netPnl;
 
+  // v30/v32: continuation shadow-check. If this position was closed by a
+  // PROTECTIVE mechanism (early-exit trip-wire or a confirmed regime flip) —
+  // not a real stop-loss or target — track what would have happened if we'd
+  // ignored the trigger and just let the ORIGINAL stop/target keep running.
+  // v32 adds: the ACTUAL realized P/L and notional, so once resolved we can
+  // compute a real dollar delta (protective exit saved/cost how much?), not
+  // just a would-win/would-lose label.
+  if (exitReason === "Early exit (rapid adverse move)") {
+    addShadowTrade(p.bot, p.coin, p.side, p.entry, p.stop, p.target,
+      "Continuation check: closed by the early-exit trip-wire — would the ORIGINAL stop/target have been reached if left open?", "early_exit_continuation", netPnl, p.notional, engine.feePct);
+  } else if (exitReason && exitReason.startsWith("Regime flipped")) {
+    addShadowTrade(p.bot, p.coin, p.side, p.entry, p.stop, p.target,
+      "Continuation check: closed by a confirmed regime flip — would the ORIGINAL stop/target have been reached if left open?", "regime_flip_continuation", netPnl, p.notional, engine.feePct);
+  }
+
+  // Finalize MAE/MFE with the exit price itself as one more data point — covers
+  // exit paths (regime-flip, early-exit, timeout) that close on current price
+  // rather than a scanned historical candle.
   const isLong = p.side === "Long";
-  const exitAdversePct = exitPrice != null ? (isLong ? (p.entry - exitPrice) / p.entry * 100 : (exitPrice - p.entry) / p.entry * 100) : 0;
-  const exitFavorablePct = exitPrice != null ? (isLong ? (exitPrice - p.entry) / p.entry * 100 : (p.entry - exitPrice) / p.entry * 100) : 0;
+  const exitAdversePct = isLong ? (p.entry - exitPrice) / p.entry * 100 : (exitPrice - p.entry) / p.entry * 100;
+  const exitFavorablePct = isLong ? (exitPrice - p.entry) / p.entry * 100 : (p.entry - exitPrice) / p.entry * 100;
   const finalMae = Math.max(p.maePct || 0, exitAdversePct);
   const finalMfe = Math.max(p.mfePct || 0, exitFavorablePct);
+  const closedAtTime = exitTime || Date.now();
   const durationHrs = p.openedAt ? (closedAtTime - p.openedAt) / 3600000 : null;
-  const result = options.resultOverride || (netPnl >= 0 ? "Win" : "Loss");
 
+  // v34 fix: v32 detected and LABELED same-candle ambiguous cases, but the
+  // label was cosmetic — hitStop still ran first, so an ambiguous close was
+  // still recorded as "Loss" and counted in every win-rate calculation
+  // throughout the app. This is exactly the bias the labeling was supposed
+  // to let you exclude, but nothing ever actually excluded it. Now genuinely
+  // classified as its own result, not folded into Win or Loss.
+  // v39 fix: also covers openingUncertain — a position whose opening minute
+  // might have genuinely touched a level right after entry, in a window
+  // the 1-minute data couldn't rule out. Whatever this trade eventually
+  // resolves to (even a clean-looking target hit much later) carries that
+  // uncertainty, since the true outcome from entry could have been different.
+  const isAmbiguousExit = (exitReason && exitReason.includes("(ambiguous")) || p.openingUncertain;
+  const result = isAmbiguousExit ? "Ambiguous" : (netPnl >= 0 ? "Win" : "Loss");
+  // v39 fix: if the position's opening was flagged uncertain but the exit
+  // itself looked clean (e.g. a plain "TP3 hit" much later), the stored
+  // exit reason wouldn't show any hint of the uncertainty. Appended here.
+  const finalExitReason = (p.openingUncertain && !exitReason.includes("(ambiguous")) ? `${exitReason} (ambiguous opening — a genuine touch right after entry couldn't be ruled out)` : exitReason;
+
+  // v32 fix: trade records only ever lived inside acc.trades (per bot+coin),
+  // and every report/totals computation iterated coinList to find them. If a
+  // coin was later removed, its historical trades effectively vanished from
+  // all reports even though the data still existed — a real survivorship
+  // bias. Now every closed trade also gets pushed to an immutable master
+  // ledger that survives regardless of the current watched coin list.
   const tradeRecord = {
-    coin: p.coin, bot: p.bot, side: p.side, entry: p.entry, stop: p.stop, target: p.target,
-    entryScore: p.entryScore, leverage: p.leverage, margin: p.margin, notional: p.notional, quantity,
-    riskReward: p.riskReward, reason: p.reason, exitPrice, exitReason, closedAt: closedAtTime,
+    coin: p.coin, bot: p.bot, botLabel: (BOTS.find(x => x.key === p.bot) || {}).label || p.bot,
+    side: p.side, entry: p.entry, stop: p.stop, target: p.target,
+    entryScore: p.entryScore,
+    leverage: p.leverage, margin: p.margin, notional: p.notional, riskReward: p.riskReward,
+    reason: p.reason, exitPrice, exitReason: finalExitReason, closedAt: closedAtTime,
     grossPnl, fees, netPnl, balanceAfter: acc.cash, result,
     openedAt: p.openedAt, durationHrs, maePct: finalMae, mfePct: finalMfe,
     concurrentOpen: p.concurrentOpen, concurrentLong: p.concurrentLong, concurrentShort: p.concurrentShort,
-    sameCoinSameSideOtherBots: p.sameCoinSameSideOtherBots || [], entrySnapshot: p.entrySnapshot,
-    dataQuality: options.dataQuality || "live", universeSource: p.universeSource || "tracked",
+    sameCoinSameSideOtherBots: p.sameCoinSameSideOtherBots || [],
+    entrySnapshot: p.entrySnapshot,
   };
   acc.trades.unshift(tradeRecord);
-  if (!Array.isArray(engine.allTradesEver)) engine.allTradesEver = [];
+  if (!engine.allTradesEver) engine.allTradesEver = [];
   engine.allTradesEver.push(tradeRecord);
-
-  // Continuation shadow starts at the protective EXIT time but retains the
-  // original entry/stop/target and original expiry boundary.
-  if (!options.neutralizePnl && (exitReason === "Early exit (rapid adverse move)" || (exitReason && exitReason.startsWith("Regime flipped")))) {
-    const vt = exitReason === "Early exit (rapid adverse move)" ? "early_exit_continuation" : "regime_flip_continuation";
-    addShadowTrade(p.bot, p.coin, p.side, p.entry, p.stop, p.target,
-      `Continuation check after ${exitReason}: would the ORIGINAL trade have done better if held?`, vt,
-      { t: closedAtTime, expiryTime: p.expiryTime || (p.openedAt + (p.maxHoldMs || (engine.maxHoldHours || 24) * 3600000)), maxHoldMs: p.maxHoldMs, actualPnl: netPnl, notional: p.notional, quantity, feePct: engine.feePct });
-  }
-
-  const isCooldownTrigger = result === "Loss" && (exitReason === "Stop-loss hit" || exitReason === "Early exit (rapid adverse move)");
+  // Re-entry cooldown: block this exact coin+strategy+direction for a while
+  // after a losing exit, so a whipsawing signal can't immediately re-open the
+  // same losing trade over and over. Originally only covered "Stop-loss hit"
+  // (fixed the ZEC bug — 7 re-entries in 15 min), but the 05 Sep report showed
+  // the exact same pattern via "Early exit" instead — RSI/Bollinger Bands,
+  // exempt from the regime filter, kept re-triggering the early-exit trip-wire
+  // on the same coin within minutes. Now covers both exit types.
+  // v33 fix: exact string equality broke the moment v32 started appending
+  // "(ambiguous — candle touched both levels)" to some stop-loss exits — an
+  // ambiguous stop-loss silently stopped triggering the cooldown at all,
+  // reopening the exact whipsaw risk the cooldown exists to prevent. Now
+  // matches on prefix, same pattern already used for regime-flip detection.
+  const isCooldownTrigger = exitReason.startsWith("Stop-loss hit") || exitReason === "Early exit (rapid adverse move)";
   if (isCooldownTrigger) {
     const cooldownMin = engine.cooldownMinutes !== undefined ? engine.cooldownMinutes : 45;
     if (cooldownMin > 0) {
       if (!acc.cooldownUntil) acc.cooldownUntil = {};
-      acc.cooldownUntil[p.side] = closedAtTime + cooldownMin * 60000;
+      acc.cooldownUntil[p.side] = (exitTime || Date.now()) + cooldownMin * 60000;
     }
   }
-
-  const sNow = state[p.coin] || wideState[p.coin];
+  // Track the most recent close per side so a future re-entry can note WHY it's
+  // choosing to open again on a coin that recently closed — transparency for
+  // review, not a trading decision. Recorded regardless of win/loss.
+  //
+  // v32 fix: previously reused p.entrySnapshot here, meaning "has evidence
+  // changed since the loss" actually compared against conditions at ENTRY,
+  // not at the moment we were proven wrong (the exit). Now captures fresh
+  // conditions at exit time — the correct baseline for that question.
+  const sNow = state[p.coin];
   const exitSnapshot = (sNow && sNow.indicators) ? {
     rsi: sNow.indicators.rsi.value,
     macdHist: sNow.indicators.macd.hist,
-    regime: (p.bot !== "rsi" && p.bot !== "boll") ? coinRegime(sNow, true) : "exempt",
-    atrPct: sNow.atrPct, volRatio: sNow.volRatio,
-  } : (p.entrySnapshot || null);
+    regime: (p.bot !== "rsi" && p.bot !== "boll") ? coinRegime(sNow) : "exempt",
+    atrPct: sNow.atrPct,
+    volRatio: sNow.volRatio,
+  } : (p.entrySnapshot || null); // fallback if live data unavailable at close
+
   if (!acc.lastClose) acc.lastClose = {};
-  acc.lastClose[p.side] = { reason: exitReason, time: closedAtTime, price: exitPrice, result, snapshot: exitSnapshot };
+  // v37 fix: was recomputing netPnl>=0?Win:Loss independently here, ignoring
+  // the correctly-classified `result` computed above — an ambiguous close
+  // (booked conservatively at the stop) was therefore stored as a confirmed
+  // "Loss" in lastClose, and the re-entry evidence-changed check treated an
+  // uncertain outcome as certain. Now reuses the same classification.
+  acc.lastClose[p.side] = { reason: exitReason, time: exitTime || Date.now(), price: exitPrice, result, snapshot: exitSnapshot };
   acc.position = null;
 }
 
@@ -1823,32 +2169,45 @@ function renderEngine() {
   document.getElementById("engineResumeBtn").style.display = (started && engine.halted) ? "inline-block" : "none";
 
   const activeBots = BOTS.filter(b => toggles[b.key]);
-  const displayBots = started ? BOTS.filter(b => toggles[b.key] || Object.values((engine.bots[b.key] && engine.bots[b.key].coins) || {}).some(a => a && (a.position || (a.trades && a.trades.length)))) : activeBots;
-  if (!started || !displayBots.length) {
+  // v36 fix: was `!started || !activeBots.length` — toggling every strategy
+  // off blanked the ENTIRE dashboard, including open positions from
+  // formerly-active strategies that are still being fully managed under the
+  // hood (per the earlier toggle-visibility fix) and all historical data.
+  // Toggles should only govern whether NEW entries can happen, never whether
+  // existing results are visible.
+  if (!started) {
     document.getElementById("bigSummary").innerHTML = "";
-    document.getElementById("compareTable").innerHTML = `<div style="color:#566078;font-size:12.5px;">${!started ? "Not running yet." : "Enable at least one strategy above."}</div>`;
+    document.getElementById("compareTable").innerHTML = `<div style="color:#566078;font-size:12.5px;">Not running yet.</div>`;
     document.getElementById("openPosTable").innerHTML = "";
     document.getElementById("closedTradeTable").innerHTML = "";
     const vEl = document.getElementById("vetoSummaryPanel"); if (vEl) vEl.innerHTML = "";
     const sEl = document.getElementById("shadowSummaryPanel"); if (sEl) sEl.innerHTML = "";
     return;
   }
+  if (!activeBots.length) {
+    document.getElementById("banner").innerHTML = `<div class="banner">No strategy is toggled on — existing positions and history below are still shown, but no NEW trades will open until you enable at least one.</div>`;
+  }
 
   // --- Per-strategy cards (replaces the old strategy x coin grid, which was
   //     mostly empty cells once many coins were inactive) ---
-  const cards = displayBots.map(b => {
-    let equity = 0, initial = 0, realized = 0, unrealized = 0, fees = 0, wins = 0, losses = 0, openCount = 0;
-    const coinsTraded = [];
-    Object.keys(engine.bots[b.key].coins || {}).forEach(coin => {
+  // v37 fix: was activeBots.map — with every strategy toggled off, cards
+  // would be an empty array, and `cards.reduce(..., cards[0])` would throw
+  // trying to read `.key` off `undefined`. Also matches the same principle
+  // applied everywhere else: a strategy's cards/history shouldn't disappear
+  // just because it's toggled off for new entries.
+  const cards = BOTS.map(b => {
+    let equity = 0, initial = 0, realized = 0, unrealized = 0, fees = 0, wins = 0, losses = 0, ambiguousTrades = 0, openCount = 0;
+    const coinsTraded = new Set();
+    // v32 fix: same immutable-ledger fix as the report generator — equity/
+    // initial cover every coin-account this bot ever had (removeCoin doesn't
+    // delete the account, just stops watching it), and trade stats come from
+    // the ledger so a removed coin's history doesn't silently disappear from
+    // the live comparison cards either.
+    Object.keys(engine.bots[b.key].coins).forEach(coin => {
       const acc = engine.bots[b.key].coins[coin];
       if (!acc) return;
       equity += accEquity(acc); initial += acc.initial;
-      acc.trades.forEach(t => {
-        realized += t.netPnl || 0; fees += t.fees || 0;
-        if (t.result === "Win") wins++; else if (t.result === "Loss") losses++;
-      });
-      if (acc.trades.length) coinsTraded.push(coin);
-      if (acc.position) {
+      if (coinList.includes(coin) && acc.position) {
         openCount++;
         const s = state[coin];
         if (s && s.price) {
@@ -1858,23 +2217,39 @@ function renderEngine() {
         }
       }
     });
+    let realizedDecided = 0;
+    (engine.allTradesEver || []).filter(t => t.bot === b.key).forEach(t => {
+      realized += t.netPnl || 0; fees += t.fees || 0;
+      // v34 fix: was if/else (Win vs everything else), silently counting
+      // "Ambiguous" trades as losses — exactly the bias the ambiguous
+      // classification exists to let you exclude.
+      // v38 fix: realized/total stay cash-consistent (conservative booking
+      // is what actually happened to the account balance) — but
+      // realizedDecided is now tracked separately for display, excluding
+      // Ambiguous trades' P/L from the research-honest figure.
+      if (t.result === "Win") { wins++; realizedDecided += t.netPnl || 0; }
+      else if (t.result === "Loss") { losses++; realizedDecided += t.netPnl || 0; }
+      else ambiguousTrades++;
+      coinsTraded.add(t.coin);
+    });
     const total = realized + unrealized;
-    const trades = wins + losses;
+    const trades = wins + losses; // ambiguous intentionally excluded from the win-rate denominator
     const winRate = trades ? (wins / trades * 100) : 0;
-    return { ...b, equity, initial, realized, unrealized, total, fees, wins, losses, trades, winRate, openCount, coinsTraded };
+    return { ...b, equity, initial, realized, realizedDecided, unrealized, total, fees, wins, losses, ambiguousTrades, trades, winRate, openCount, coinsTraded: [...coinsTraded], toggledOff: !toggles[b.key] };
   });
-  const bestKey = cards.reduce((m, c) => c.total > m.total ? c : m, cards[0]).key;
+  const bestKey = cards.length ? cards.reduce((m, c) => c.total > m.total ? c : m, cards[0]).key : null;
 
   document.getElementById("compareTable").innerHTML = `
     <div class="strat-cards">
     ${cards.map(c => `
       <div class="strat-card ${c.key === bestKey && c.total !== 0 ? "leading" : ""}">
         <div class="strat-card-head">
-          <span class="strat-name">${c.label}${c.key === bestKey && c.total !== 0 ? " 🏆" : ""}</span>
+          <span class="strat-name">${c.label}${c.key === bestKey && c.total !== 0 ? " 🏆" : ""}${c.toggledOff ? ` <span style="color:#e0ac4c; font-size:10.5px; font-weight:400;">(new entries off)</span>` : ""}</span>
           <span class="strat-total ${c.total >= 0 ? "cell-pos" : "cell-neg"}">${c.total >= 0 ? "+" : ""}$${fmt(c.total)}</span>
         </div>
         <div class="strat-rows">
           <div class="strat-row"><span>Booked profit</span><span class="${c.realized >= 0 ? "cell-pos" : "cell-neg"}" style="font-weight:700;">${c.realized >= 0 ? "+" : ""}$${fmt(c.realized)}</span></div>
+          ${c.ambiguousTrades ? `<div class="strat-row"><span style="color:#e0ac4c;">Decided-only (excl. ${c.ambiguousTrades} ambiguous)</span><span style="color:#e0ac4c;">${c.realizedDecided >= 0 ? "+" : ""}$${fmt(c.realizedDecided)}</span></div>` : ""}
           <div class="strat-row"><span>Unrealized (open)</span><span class="${c.unrealized >= 0 ? "cell-pos" : "cell-neg"}">${c.unrealized >= 0 ? "+" : ""}$${fmt(c.unrealized)}</span></div>
           <div class="strat-row"><span>Balance</span><span>$${fmt(c.equity)} <span style="color:#566078;font-size:10.5px;">of $${fmt(c.initial, 0)}</span></span></div>
           <div class="strat-row"><span>Trades</span><span>${c.trades ? `${c.wins}W / ${c.losses}L · ${fmt(c.winRate, 0)}%` : "none yet"}</span></div>
@@ -1888,12 +2263,37 @@ function renderEngine() {
   document.getElementById("strategyBubbleMap").innerHTML = renderStrategyBubbleMap(cards);
 
   // --- Big, hard-to-miss summary: unrealized P/L + available cash across everything ---
-  let totalAvailableCash = 0, totalLockedMargin = 0, totalFeesPaid = 0, totalGrossPnl = 0, totalRealized = 0;
-  BOTS.forEach(b => Object.keys((engine.bots[b.key] && engine.bots[b.key].coins) || {}).forEach(coin => {
+  let totalAvailableCash = 0, totalLockedMargin = 0, totalFeesPaid = 0, totalGrossPnl = 0, totalRealized = 0, totalRealizedDecided = 0, totalAmbiguousCount = 0;
+  // v34 fix: was activeBots (toggle-filtered) — a disabled strategy's cash
+  // balance and any open position's locked margin are real money that
+  // shouldn't vanish from the top-level summary just because new entries
+  // are toggled off for it.
+  BOTS.forEach(b => coinList.forEach(coin => {
     const acc = engine.bots[b.key].coins[coin];
-    if (acc) { totalAvailableCash += acc.cash; if (acc.position) totalLockedMargin += acc.position.margin; }
+    if (acc) {
+      totalAvailableCash += acc.cash;
+      if (acc.position) totalLockedMargin += acc.position.margin;
+    }
   }));
-  canonicalLedger().forEach(t => { totalFeesPaid += t.fees || 0; totalGrossPnl += t.grossPnl || 0; totalRealized += t.netPnl || 0; });
+  // v33 fix: fee/gross/realized totals now come from the immutable ledger —
+  // this was the same survivorship bug as strategy totals, just in the live
+  // summary panel instead of the exported report.
+  // v34 fix: no longer filtered by activeBots either — a strategy's PAST
+  // performance is real money that happened; it shouldn't disappear from
+  // totals just because the strategy is toggled off today. Same principle
+  // already applied to removed coins, now applied consistently to toggles.
+  // v38 fix: ChatGPT correctly flagged that "ambiguous accounting fully
+  // fixed" was too strong — Ambiguous trades were excluded from win/loss
+  // classification, but their conservative (stop-booked) netPnl still flowed
+  // unconditionally into every realized-P/L total. Cash accounting stays
+  // conservative (a concrete number is needed for the simulation to
+  // continue), but totalRealizedDecided now gives the honest research
+  // figure with Ambiguous trades' P/L excluded, displayed alongside it.
+  (engine.allTradesEver || []).forEach(t => {
+    totalFeesPaid += t.fees || 0; totalGrossPnl += t.grossPnl || 0; totalRealized += t.netPnl || 0;
+    if (t.result === "Ambiguous") totalAmbiguousCount++;
+    else totalRealizedDecided += t.netPnl || 0;
+  });
 
   // Engine event log (regime flips, circuit breaker)
   const evEl = document.getElementById("eventLog");
@@ -1901,6 +2301,20 @@ function renderEngine() {
     evEl.innerHTML = engineEvents.length
       ? engineEvents.slice(0, 6).map(e => `<div>${new Date(e.t).toLocaleString()} — ${e.msg}</div>`).join("")
       : `<div style="color:#566078;">No regime flips or circuit-breaker events yet.</div>`;
+  }
+
+  // v33: circuit breaker denominator transparency — an 8% threshold means
+  // something very different depending on whether it's measured against
+  // deployed margin or total theoretical capital across every strategy+coin.
+  const cbEl = document.getElementById("circuitBreakerInfo");
+  if (cbEl) {
+    const cb = engine.lastCircuitBreakerCheck;
+    const storageBytes = estimateLocalStorageBytes();
+    const storageMB = storageBytes / (1024 * 1024);
+    const storageWarning = storageMB > 3.5 ? ` · <span style="color:#e0ac4c;">Browser storage: ${storageMB.toFixed(1)}MB — approaching typical limits, consider downloading a report and starting fresh soon</span>` : "";
+    cbEl.innerHTML = ((cb && engine.circuitBreakerPct)
+      ? `Circuit breaker: ${engine.circuitBreakerPct}% of $${fmt(cb.totalCapital, 0)} total capital = triggers at -$${fmt(cb.triggerLossAmount, 0)} unrealized loss (currently $${fmt(cb.totalUnreal)}, ${fmt(cb.drawdownPct, 1)}%)`
+      : "") + storageWarning;
   }
 
   // Shared label lookup for both the Decision Log (vetoes) and Shadow Trades
@@ -1911,17 +2325,16 @@ function renderEngine() {
     reentry_unchanged: "Re-entry blocked (evidence unchanged since last loss)",
     late_entry: "Late entry (chasing an already-extended move)",
     weak_momentum: "Weak momentum (sign supports trade but strength is fading)",
-    target_capped: "Target capped or rejected at 24h structural close-range",
+    target_capped: "Target capped or rejected at real support/resistance",
     reversal_unconfirmed: "RSI/Bollinger reversal not yet earned",
     cooldown_active: "Blocked by cooldown timer (recent loss on this coin+direction)",
     regime_gate: "Regime gate (wrong direction or not yet stable)",
     thin_volume: "Volume too thin to confirm the move",
     below_min_profit: "Expected profit below the minimum worth taking",
-    invalid_plan: "Invalid/incomplete trade plan",
-    stop_too_tight: "Stop too tight for minimum risk room",
-    exposure_cap: "Exposure cap (same-direction strategy limit)",
     early_exit_continuation: "Early-exit trip-wire (would the ORIGINAL trade have won if left open?)",
     regime_flip_continuation: "Regime-flip exit (would the ORIGINAL trade have won if left open?)",
+    exposure_cap: "Exposure cap (already at max same-direction positions)",
+    stop_too_tight: "Stop distance too tight to be meaningful",
   };
 
   // Decision log / veto counter panel
@@ -1949,16 +2362,21 @@ function renderEngine() {
       shadowEl.innerHTML = `<div class="event-log" style="color:#566078;">No shadow trades yet — these accumulate as vetoes fire.</div>`;
     } else {
       const shadowWinRate = ss.resolved ? (ss.wins / (ss.wins + ss.losses || 1) * 100) : 0;
-      // Compare against real trades' win rate for direct context
-      let realWins = 0, realTotal = 0;
-      canonicalLedger().forEach(t => { if (t.result === "Win" || t.result === "Loss") { realTotal++; if (t.result === "Win") realWins++; } });
+      // Compare against real trades' win rate for direct context.
+      // v33 fix: same ledger fix — this used to lose a removed coin's trades.
+      // v37 fix: was realWins/realTotal (total included Ambiguous trades in
+      // the denominator, silently lowering the displayed win rate). Now uses
+      // decided outcomes only, same as everywhere else.
+      const realTrades = (engine.allTradesEver || []);
+      const realWins = realTrades.filter(t => t.result === "Win").length;
+      const realLosses = realTrades.filter(t => t.result === "Loss").length;
+      const realTotal = realWins + realLosses;
       const realWinRate = realTotal ? (realWins / realTotal * 100) : 0;
       let html = `<div class="stat-grid" style="margin-bottom:10px;">
         <div class="stat-box"><div class="stat-label">Shadow trades tracked</div><div class="stat-val">${ss.total}</div></div>
         <div class="stat-box"><div class="stat-label">Resolved</div><div class="stat-val">${ss.resolved} <span style="font-size:11px; color:#566078;">(${ss.pending} still pending)</span></div></div>
         <div class="stat-box"><div class="stat-label">Would have WON</div><div class="stat-val pos">${ss.wins}</div></div>
         <div class="stat-box"><div class="stat-label">Would have LOST</div><div class="stat-val neg">${ss.losses}</div></div>
-        <div class="stat-box"><div class="stat-label">Ambiguous (excluded)</div><div class="stat-val">${ss.ambiguous || 0}</div></div>
         <div class="stat-box highlight"><div class="stat-label">Blocked win rate vs REAL win rate</div><div class="stat-val" style="font-size:18px;">${fmt(shadowWinRate,0)}% <span style="color:#566078; font-size:12px;">vs</span> ${fmt(realWinRate,0)}%</div></div>
       </div>`;
       const byTypeKeys = Object.keys(ss.byType);
@@ -1968,13 +2386,13 @@ function renderEngine() {
           const wr = (d.wins + d.losses) ? (d.wins / (d.wins + d.losses) * 100) : 0;
           const isContinuation = k === "early_exit_continuation" || k === "regime_flip_continuation";
           const tooFew = d.wins + d.losses < 5;
+          const avgHyp = d.hypNetCount ? (d.hypNetSum / d.hypNetCount) : null;
+          const expectancyStr = avgHyp !== null ? ` · avg $${fmt(avgHyp)}/trade` : "";
           const verdict = tooFew ? "Too few resolved yet to judge"
             : isContinuation
               ? (wr < 25 ? "Closing early looks like the RIGHT call — the original position mostly would have lost anyway" : wr > 45 ? "May be closing WINNERS too early — worth reviewing how sensitive this trigger is" : "Mixed — inconclusive so far")
               : (wr < 25 ? "Blocking this looks like the RIGHT call" : wr > 45 ? "This filter may be too strict — worth reviewing" : "Mixed — inconclusive so far");
-          const avgNet = d.pnlN ? d.net / d.pnlN : null;
-          const avgMae = d.n ? d.mae / d.n : 0, avgMfe = d.n ? d.mfe / d.n : 0;
-          return `<div style="padding:6px 0; border-bottom:1px solid rgba(38,48,73,0.6);"><b style="color:#93a3c2;">${DECISION_LABELS[k] || k}</b> — ${d.n} resolved, ${d.wins}W/${d.losses}L (${fmt(wr,0)}% would-win) · ${d.timeouts} timeout · ${d.ambiguous||0} ambiguous · sole-global ${d.soleN||0}${avgNet!==null?` · avg hyp net ${avgNet>=0?"+":""}$${fmt(avgNet)}`:""} · avg MAE ${fmt(avgMae,2)}% / MFE ${fmt(avgMfe,2)}%<br/><span style="color:${wr>45?"#f87189":wr<25?"#4ade8f":"#7c879c"}; font-size:10.5px;">${verdict}</span></div>`;
+          return `<div style="padding:6px 0; border-bottom:1px solid rgba(38,48,73,0.6);"><b style="color:#93a3c2;">${DECISION_LABELS[k] || k}</b> — ${d.n} resolved, ${d.wins}W/${d.losses}L${d.ambiguous ? `/${d.ambiguous} ambiguous` : ""} (${fmt(wr,0)}% would-win) · ${d.timeouts} timed out${expectancyStr}<br/><span style="color:${wr>45?"#f87189":wr<25?"#4ade8f":"#7c879c"}; font-size:10.5px;">${verdict}</span></div>`;
         }).join("")}</div>`;
       }
       shadowEl.innerHTML = html;
@@ -1984,12 +2402,22 @@ function renderEngine() {
   // --- Currently open positions ---
   let openRows = [];
   let totalUnrealized = 0;
-  BOTS.forEach(b => Object.keys((engine.bots[b.key] && engine.bots[b.key].coins) || {}).forEach(coin => {
+  // v34 fix: was activeBots — a toggled-off strategy's open position is
+  // still fully managed (stop/target/regime-flip all still run for it, per
+  // the earlier toggle fix), but it was invisible here, meaning real money
+  // still at risk had no way to be seen in the UI at all.
+  BOTS.forEach(b => coinList.forEach(coin => {
     const acc = engine.bots[b.key].coins[coin];
     if (acc && acc.position) {
-      const p = acc.position, s = state[coin] || wideState[coin], curPrice = s ? s.price : null;
+      const p = acc.position;
+      const s = state[coin];
+      const curPrice = s ? s.price : null;
       let unrealPnl = null;
-      if (curPrice) { const movePct = p.side === "Long" ? (curPrice-p.entry)/p.entry : (p.entry-curPrice)/p.entry; unrealPnl = movePct * p.notional; totalUnrealized += unrealPnl; }
+      if (curPrice) {
+        const movePct = p.side === "Long" ? (curPrice - p.entry) / p.entry : (p.entry - curPrice) / p.entry;
+        unrealPnl = movePct * p.notional;
+        totalUnrealized += unrealPnl;
+      }
       openRows.push({ ...p, botLabel: b.label, curPrice, unrealPnl });
     }
   }));
@@ -2010,6 +2438,7 @@ function renderEngine() {
       <div class="big-box highlight">
         <div class="big-label">Booked profit (closed)</div>
         <div class="big-val ${totalRealized > 0 ? "pos" : totalRealized < 0 ? "neg" : ""}">${totalRealized >= 0 ? "+" : ""}$${fmt(totalRealized)}</div>
+        ${totalAmbiguousCount ? `<div style="font-size:10px; color:#e0ac4c; margin-top:2px;">Includes ${totalAmbiguousCount} ambiguous trade${totalAmbiguousCount > 1 ? "s" : ""} — conservative simulation accounting, excluded from decided-only research P/L below. Decided-only: ${totalRealizedDecided >= 0 ? "+" : ""}$${fmt(totalRealizedDecided)}</div>` : ""}
       </div>
       <div class="big-box">
         <div class="big-label">Unrealized P/L (open trades)</div>
@@ -2039,21 +2468,23 @@ function renderEngine() {
       </div>
     </div>`;
 
-  let allTrades = canonicalLedger().map(t => ({ ...t, botLabel: (BOTS.find(b => b.key === t.bot) || {label:t.bot}).label }));
+  // v33 fix: same ledger fix — recent trades widget used to lose a removed
+  // coin's history too, even if it closed just moments before removal.
+  let allTrades = (engine.allTradesEver || []).slice();
   allTrades.sort((a, b) => b.closedAt - a.closedAt);
   const recent = allTrades.slice(0, 20);
   document.getElementById("closedTradeTable").innerHTML = recent.length ? `
     <div class="trow head" style="grid-template-columns:75px 55px 50px 50px 80px 80px 90px 70px 75px;"><span>Strategy</span><span>Coin</span><span>Side</span><span>Score</span><span>Entry</span><span>Exit</span><span>Reason</span><span>Net</span><span>Balance</span></div>
-    ${recent.map(t => `<div class="trow" style="grid-template-columns:75px 55px 50px 50px 80px 80px 90px 70px 75px;"><span>${t.botLabel}</span><span>${t.coin}</span><span class="${t.side === "Long" ? "long-tag" : "short-tag"}">${t.side}</span><span style="font-weight:700; color:${t.entryScore == null ? "#566078" : t.entryScore >= 70 ? "#4ade8f" : t.entryScore >= 65 ? "#e0ac4c" : "#f87189"};">${t.entryScore == null ? "—" : t.entryScore}</span><span>$${fmt(t.entry, decimalsFor(t.entry))}</span><span>$${fmt(t.exitPrice, decimalsFor(t.exitPrice))}</span><span>${t.exitReason}</span><span class="${t.result === "Win" ? "win" : t.result === "Loss" ? "loss" : ""}">$${fmt(t.netPnl)}</span><span>$${fmt(t.balanceAfter)}</span></div>`).join("")}
+    ${recent.map(t => `<div class="trow" style="grid-template-columns:75px 55px 50px 50px 80px 80px 90px 70px 75px;"><span>${t.botLabel}</span><span>${t.coin}</span><span class="${t.side === "Long" ? "long-tag" : "short-tag"}">${t.side}</span><span style="font-weight:700; color:${t.entryScore == null ? "#566078" : t.entryScore >= 70 ? "#4ade8f" : t.entryScore >= 65 ? "#e0ac4c" : "#f87189"};">${t.entryScore == null ? "—" : t.entryScore}</span><span>$${fmt(t.entry, decimalsFor(t.entry))}</span><span>$${fmt(t.exitPrice, decimalsFor(t.exitPrice))}</span><span>${t.exitReason}</span><span class="${t.result === "Win" ? "win" : t.result === "Ambiguous" ? "ambiguous-result" : "loss"}">$${fmt(t.netPnl)}</span><span>$${fmt(t.balanceAfter)}</span></div>`).join("")}
   ` : `<div style="color:#566078;font-size:12.5px;padding:6px 0;">No closed trades yet.</div>`;
 }
 
 function generateReport() {
   if (!engine) { alert("Start the test first."); return ""; }
-  const activeBots = BOTS;
+  const activeBots = BOTS.filter(b => toggles[b.key]);
   let out = "";
   out += `STRATEGY COMPARISON REPORT\nGenerated: ${new Date().toLocaleString()}\nRunning since: ${new Date(engine.startedAt).toLocaleString()}\nBuild: ${BUILD_TAG}\n`;
-  out += `Assumption: $ per coin per strategy = $${engine.perCoinCapital}, treated 1:1 with £. Leverage ${engine.leverage}x. Binance perpetual-futures candles. Fees modeled from entry and exit value; funding signal observed but funding P/L not charged.\nData quality: ${ambiguousCandleCount} ambiguous REAL-trade intrabar cases detected/excluded from hard W/L conclusions; shadow ambiguities are reported separately.\n\n`;
+  out += `Assumption: $ per coin per strategy = $${engine.perCoinCapital}, treated 1:1 with £. Leverage ${engine.leverage}x. Fees 0.1% per side, no funding modeled. Price/execution uses SPOT candles; funding-rate signal is from PERPETUAL FUTURES as a sentiment proxy only, not simulated as a cost.\n\n`;
 
   out += `=== DECISION LOG (why trades were rejected, v28/v29) ===\n`;
   const vSummary = vetoSummary();
@@ -2063,17 +2494,16 @@ function generateReport() {
     reentry_unchanged: "Re-entry blocked (evidence unchanged since last loss)",
     late_entry: "Late entry (chasing an already-extended move)",
     weak_momentum: "Weak momentum (sign supports trade but strength is fading)",
-    target_capped: "Target capped or rejected at 24h structural close-range",
+    target_capped: "Target capped or rejected at real support/resistance",
     reversal_unconfirmed: "RSI/Bollinger reversal not yet earned (range/exhaustion/structure/volume/confirmation)",
     cooldown_active: "Blocked by cooldown timer (recent loss on this coin+direction)",
     regime_gate: "Regime gate (wrong direction or not yet stable)",
     thin_volume: "Volume too thin to confirm the move",
     below_min_profit: "Expected profit below the minimum worth taking",
-    invalid_plan: "Invalid/incomplete trade plan",
-    stop_too_tight: "Stop too tight for minimum risk room",
-    exposure_cap: "Exposure cap (same-direction strategy limit)",
     early_exit_continuation: "Early-exit trip-wire (would the ORIGINAL trade have won if left open?)",
     regime_flip_continuation: "Regime-flip exit (would the ORIGINAL trade have won if left open?)",
+    exposure_cap: "Exposure cap (already at max same-direction positions)",
+    stop_too_tight: "Stop distance too tight to be meaningful",
   };
   const vKeys = Object.keys(vSummary);
   if (!vKeys.length) out += "No vetoes fired this run.\n";
@@ -2090,14 +2520,16 @@ function generateReport() {
   out += `Total tracked: ${ssRep.total} | Resolved: ${ssRep.resolved} | Still pending: ${ssRep.pending}\n`;
   if (ssRep.resolved) {
     const swr = (ssRep.wins / (ssRep.wins + ssRep.losses || 1)) * 100;
-    out += `Would have WON: ${ssRep.wins} | Would have LOST: ${ssRep.losses} | Ambiguous/excluded: ${ssRep.ambiguous || 0} | Timed out: ${ssRep.timeouts} | Blocked win rate: ${fmt(swr,1)}%\n`;
+    out += `Would have WON: ${ssRep.wins} | Would have LOST: ${ssRep.losses} | Timed out: ${ssRep.timeouts} | Ambiguous: ${ssRep.ambiguousCount} | Blocked win rate: ${fmt(swr,1)}%\n`;
     Object.keys(ssRep.byType).forEach(k => {
       const d = ssRep.byType[k];
       const wr = (d.wins + d.losses) ? (d.wins / (d.wins + d.losses) * 100) : 0;
-      const avgNet = d.pnlN ? d.net / d.pnlN : null;
-      const avgMae = d.n ? d.mae / d.n : 0, avgMfe = d.n ? d.mfe / d.n : 0;
-      out += `  ${vLabels[k] || k}: ${d.n} resolved, ${d.wins}W/${d.losses}L (${fmt(wr,1)}% would-win), ${d.timeouts} timeout, ${d.ambiguous||0} ambiguous, sole-global ${d.soleN||0}${avgNet!==null?`, avg hyp net ${avgNet>=0?"+":""}$${fmt(avgNet)}`:""}, avg MAE ${fmt(avgMae,2)}%, avg MFE ${fmt(avgMfe,2)}%
-`;
+      // v34: expectancy in dollars, not just win rate — a high would-win
+      // rate can still mean a poor filter if winners are small and losses
+      // large. avgHyp is the average hypothetical $ outcome per candidate.
+      const avgHyp = d.hypNetCount ? (d.hypNetSum / d.hypNetCount) : null;
+      const expectancyStr = avgHyp !== null ? ` | avg hypothetical $${fmt(avgHyp)}/trade` : "";
+      out += `  ${vLabels[k] || k}: ${d.n} resolved, ${d.wins}W/${d.losses}L${d.ambiguous ? `/${d.ambiguous} ambiguous` : ""} (${fmt(wr,1)}% would-win), ${d.timeouts} timed out${expectancyStr}\n`;
     });
   } else {
     out += `No shadow trades resolved yet.\n`;
@@ -2124,94 +2556,138 @@ function generateReport() {
   out += `=== FULL SHADOW TRADE LOG — every individual tracked candidate, this run (${runShadows.length} entries) ===\n`;
   if (!runShadows.length) out += "None this run.\n";
   runShadows.forEach(st => {
-    const resStr = st.status === "pending" ? "PENDING" : st.resolution === "would_win" ? "WOULD HAVE WON" : st.resolution === "would_lose" ? "WOULD HAVE LOST" : st.resolution === "ambiguous" ? "AMBIGUOUS/EXCLUDED" : st.resolution === "would_timeout" ? "TIMED OUT" : "DATA UNAVAILABLE";
-    const resolvedStr = st.resolvedAt ? ` | Resolved: ${new Date(st.resolvedAt).toLocaleString()}${st.resolvedPrice != null ? " @ $"+fmt(st.resolvedPrice, decimalsFor(st.resolvedPrice)) : ""}` : "";
-    const pnlStr = st.hypotheticalPnl != null ? ` | Hyp net $${fmt(st.hypotheticalPnl)} | MAE ${fmt(st.maePct||0,2)}% MFE ${fmt(st.mfePct||0,2)}%` : "";
-    const vetoStr = st.failedVetoes && st.failedVetoes.length ? ` | Failed gates: ${[...new Set(st.failedVetoes.map(v=>v.type))].join(", ")} | Would trade if this veto removed alone: ${st.wouldTradeIfRemoved ? "YES" : "NO"}` : "";
-    out += `[${new Date(st.t).toLocaleString()}] ${BOTS.find(x=>x.key===st.bot)?.label || st.bot} | ${st.coin} ${st.side} | ${vLabels[st.vetoType] || st.vetoType} | Entry $${fmt(st.entry, decimalsFor(st.entry))} Stop $${fmt(st.stop, decimalsFor(st.stop))} Target $${fmt(st.target, decimalsFor(st.target))} | ${resStr}${resolvedStr}${pnlStr}${vetoStr} | Quality: ${st.dataQuality || "n/a"} | Reason: ${st.reason}
-`;
+    // v37 fix: ambiguous resolutions fell into the generic fallback and
+    // displayed as "TIMED OUT (unresolved)" — misleading, since they were
+    // genuinely resolved, just with an uncertain sequence. Now labeled explicitly.
+    const resStr = st.status === "pending" ? "PENDING" : st.resolution === "would_win" ? "WOULD HAVE WON" : st.resolution === "would_lose" ? "WOULD HAVE LOST" : st.resolution === "ambiguous" ? "AMBIGUOUS (both levels touched, sequence uncertain)" : st.resolution === "would_timeout" ? "WOULD HAVE TIMED OUT" : "UNRESOLVED";
+    const resolvedStr = st.resolvedAt ? ` | Resolved: ${new Date(st.resolvedAt).toLocaleString()} @ $${fmt(st.resolvedPrice, decimalsFor(st.resolvedPrice))}` : "";
+    const dollarStr = (st.classification) ? ` | Actual $${fmt(st.actualPnl)} vs hypothetical hold $${fmt(st.hypotheticalPnl)} (delta $${fmt(st.deltaVsActual)}, ${st.classification})` : "";
+    out += `[${new Date(st.t).toLocaleString()}] ${BOTS.find(x=>x.key===st.bot)?.label || st.bot} | ${st.coin} ${st.side} | ${vLabels[st.vetoType] || st.vetoType} | Entry $${fmt(st.entry, decimalsFor(st.entry))} Stop $${fmt(st.stop, decimalsFor(st.stop))} Target $${fmt(st.target, decimalsFor(st.target))} | ${resStr}${resolvedStr}${dollarStr} | Reason: ${st.reason}\n`;
   });
-  out += `
-`;
+  out += `\n`;
 
-  out += `=== CORRELATED EXPOSURE (measurement only — strategies remain fully independent) ===
-`;
-  const allTradesForCluster = canonicalLedger().filter(t => t.result === "Win" || t.result === "Loss");
+  out += `=== CORRELATED EXPOSURE (measurement only — strategies remain fully independent) ===\n`;
+  // v36 fix: was filtered by toggles[t.bot] — same historical-shouldn't-
+  // depend-on-today's-toggle inconsistency as the sections already fixed.
+  const allTradesForCluster = engine.allTradesEver || [];
   const clustered = allTradesForCluster.filter(t => t.sameCoinSameSideOtherBots && t.sameCoinSameSideOtherBots.length > 0);
   const isolated = allTradesForCluster.filter(t => !t.sameCoinSameSideOtherBots || t.sameCoinSameSideOtherBots.length === 0);
   const netOf = arr => arr.reduce((a,t) => a + (t.netPnl||0), 0);
-  const winRateOf = arr => arr.length ? arr.filter(t=>t.result==="Win").length/arr.length*100 : 0;
+  // v37 fix: was wins/arr.length (denominator included Ambiguous trades,
+  // silently lowering the displayed win rate). Now uses decided outcomes only.
+  const winRateOf = arr => { const w = arr.filter(t=>t.result==="Win").length, l = arr.filter(t=>t.result==="Loss").length; return (w+l) ? w/(w+l)*100 : 0; };
   out += `Trades sharing a coin+direction with another active strategy at entry: ${clustered.length} of ${allTradesForCluster.length} | win rate ${fmt(winRateOf(clustered),1)}% | net $${fmt(netOf(clustered))}\n`;
   out += `Trades with no other strategy on the same coin+direction: ${isolated.length} of ${allTradesForCluster.length} | win rate ${fmt(winRateOf(isolated),1)}% | net $${fmt(netOf(isolated))}\n`;
   out += `Interpretation: if clustered trades underperform isolated ones, several strategies may be repeatedly multiplying exposure to the same underlying market thesis rather than genuinely diversifying it.\n\n`;
 
-  out += `=== STRATEGY TOTALS (all coins combined) ===
-`;
-  const ledgerAll = canonicalLedger();
-  const totals = activeBots.map(b => {
+  out += `=== STRATEGY TOTALS (all coins combined) ===\n`;
+  const allEverTrades = engine.allTradesEver || [];
+  // v36 fix: was activeBots — toggling a strategy off hid its ENTIRE
+  // dedicated summary row from this report, even though 5 other sections
+  // were already fixed to show full history regardless of toggle state.
+  // Inconsistent with the same principle applied everywhere else.
+  const totals = BOTS.map(b => {
     let eq = 0, init = 0;
-    Object.values((engine.bots[b.key] && engine.bots[b.key].coins) || {}).forEach(acc => { if (acc) { eq += accEquity(acc); init += acc.initial; } });
-    const trades = ledgerAll.filter(t => t.bot === b.key);
+    // v32 fix: sum ALL coin-accounts that exist for this bot, not just
+    // currently-watched ones. removeCoin() never deletes the account object
+    // itself (only removes it from coinList/state) — a removed coin's cash
+    // balance was silently excluded from equity/return totals even though
+    // it's real money sitting in that account.
+    Object.keys(engine.bots[b.key].coins).forEach(coin => {
+      const acc = engine.bots[b.key].coins[coin];
+      if (acc) { eq += accEquity(acc); init += acc.initial; }
+    });
+    const trades = allEverTrades.filter(t => t.bot === b.key);
     return { label: b.label, eq, init, ret: init ? (eq - init) / init * 100 : 0, trades };
   });
   totals.sort((a, b) => b.ret - a.ret);
-  let allGross = 0, allFees = 0, allNet = 0;
+  let allGross = 0, allFees = 0, allNet = 0, allGrossDecided = 0, allFeesDecided = 0, allNetDecided = 0, allAmbiguous = 0;
   totals.forEach((t, i) => {
     const wins = t.trades.filter(x => x.result === "Win").length, losses = t.trades.filter(x => x.result === "Loss").length;
+    const ambiguous = t.trades.filter(x => x.result === "Ambiguous").length;
+    allAmbiguous += ambiguous;
     const gross = t.trades.reduce((a, x) => a + (x.grossPnl || 0), 0);
     const fees = t.trades.reduce((a, x) => a + (x.fees || 0), 0);
+    // v38 fix: decided-only gross/fees, excluding Ambiguous trades — the
+    // conservative (stop-booked) figures above still include them.
+    const decidedTrades = t.trades.filter(x => x.result !== "Ambiguous");
+    const grossDecided = decidedTrades.reduce((a, x) => a + (x.grossPnl || 0), 0);
+    const feesDecided = decidedTrades.reduce((a, x) => a + (x.fees || 0), 0);
     allGross += gross; allFees += fees; allNet += (gross - fees);
-    const amb = t.trades.filter(x => x.result === "Ambiguous").length;
-    out += `${i === 0 ? "BEST: " : ""}${t.label}: $${fmt(t.init)} → $${fmt(t.eq)} (${t.ret >= 0 ? "+" : ""}${fmt(t.ret)}%) | ${t.trades.length} records | ${wins}W/${losses}L/${amb}A | gross $${fmt(gross)} | fees -$${fmt(fees)}
-`;
+    allGrossDecided += grossDecided; allFeesDecided += feesDecided; allNetDecided += (grossDecided - feesDecided);
+    out += `${i === 0 ? "BEST: " : ""}${t.label}: $${fmt(t.init)} → $${fmt(t.eq)} (${t.ret >= 0 ? "+" : ""}${fmt(t.ret)}%) | ${t.trades.length} trades | ${wins}W/${losses}L${ambiguous ? `/${ambiguous} ambiguous` : ""} | gross $${fmt(gross)} | fees -$${fmt(fees)}\n`;
   });
   out += `\n=== FEE IMPACT (all strategies) ===\n`;
   out += `Gross P/L before fees: ${allGross >= 0 ? "+" : ""}$${fmt(allGross)}\nTotal fees paid: -$${fmt(allFees)}\nNet P/L after fees: ${allNet >= 0 ? "+" : ""}$${fmt(allNet)}\n`;
+  if (allAmbiguous) out += `NOTE: these figures include ${allAmbiguous} Ambiguous trade${allAmbiguous > 1 ? "s" : ""} using conservative simulation accounting (not necessarily the stop — an expiry-boundary ambiguity uses the fallback/expiry price instead). Decided-only (excludes Ambiguous): gross ${allGrossDecided >= 0 ? "+" : ""}$${fmt(allGrossDecided)} | fees -$${fmt(allFeesDecided)} | net ${allNetDecided >= 0 ? "+" : ""}$${fmt(allNetDecided)}\n`;
   if (allGross > 0) out += `Fees consumed ${fmt((allFees / allGross) * 100, 0)}% of gross profit.\n`;
 
   out += `\n=== PERFORMANCE BY ENTRY SCORE ===\n`;
   out += `Does a higher scanner score actually mean a better trade? This is the evidence.\n`;
-  const allForScore = canonicalLedger();
+  // v33 fix: same ledger fix — this research question specifically needs
+  // ALL historical trades, including any coin later removed, or the
+  // score-vs-outcome evidence quietly shrinks every time a coin gets pruned.
+  const allForScore = (engine.allTradesEver || []);
   const bands = [
-    { label: "80-100 (high score)", min: 80, max: 101 },
-    { label: "70-79  (upper-mid score)", min: 70, max: 80 },
-    { label: "65-69  (mid score)", min: 65, max: 70 },
-    { label: "Below 65 (low score)", min: 0, max: 65 },
+    { label: "80-100 (very strong)", min: 80, max: 101 },
+    { label: "70-79  (strong)", min: 70, max: 80 },
+    { label: "65-69  (borderline)", min: 65, max: 70 },
+    { label: "Below 65 (weak)", min: 0, max: 65 },
   ];
   bands.forEach(band => {
     const ts = allForScore.filter(t => t.entryScore != null && t.entryScore >= band.min && t.entryScore < band.max);
     if (!ts.length) { out += `${band.label}: no trades\n`; return; }
-    const valid = ts.filter(t => t.result === "Win" || t.result === "Loss");
-    const w = valid.filter(t => t.result === "Win").length;
-    const l = valid.length - w;
-    const net = valid.reduce((a, t) => a + (t.netPnl || 0), 0);
-    out += `${band.label}: ${valid.length} valid W/L trades${ts.length !== valid.length ? ` + ${ts.length-valid.length} excluded` : ""} | ${w}W/${l}L (${valid.length ? fmt(w / valid.length * 100, 0) : "n/a"}% win) | net $${fmt(net)} | avg ${valid.length ? "$"+fmt(net / valid.length) : "n/a"}
-`;
+    // v34 fix: was computing win rate as wins/total and loss count as
+    // (total-wins) — both silently folded "Ambiguous" trades into the loss
+    // side, biasing exactly the research question this section exists to
+    // answer honestly. Now excludes ambiguous from both the loss count and
+    // the win-rate denominator, showing it as its own number instead.
+    const w = ts.filter(t => t.result === "Win").length;
+    const l = ts.filter(t => t.result === "Loss").length;
+    const amb = ts.filter(t => t.result === "Ambiguous").length;
+    const decided = w + l;
+    const net = ts.reduce((a, t) => a + (t.netPnl || 0), 0);
+    // v38 fix: net still summed every trade including Ambiguous (booked
+    // conservatively at the stop) — this is the specific example the audit
+    // cited. Now also shows the decided-only figure alongside it.
+    const netDecided = ts.filter(t => t.result !== "Ambiguous").reduce((a, t) => a + (t.netPnl || 0), 0);
+    const netStr = amb ? ` | net $${fmt(net)} (decided-only: $${fmt(netDecided)})` : ` | net $${fmt(net)}`;
+    out += `${band.label}: ${ts.length} trades | ${w}W/${l}L${amb ? `/${amb} ambiguous` : ""} (${decided ? fmt(w / decided * 100, 0) : "n/a"}% win)${netStr} | avg $${fmt(net / ts.length)}\n`;
   });
   const unscored = allForScore.filter(t => t.entryScore == null).length;
   if (unscored) out += `(${unscored} older trades have no score recorded)\n`;
 
   out += `\n=== BY COIN, BY STRATEGY ===\n`;
-  const reportCoins = [...new Set(BOTS.flatMap(b => Object.keys((engine.bots[b.key] && engine.bots[b.key].coins) || {})).concat(canonicalLedger().map(t => t.coin)))].sort();
-  reportCoins.forEach(coin => {
-    out += `\n${coin}:\n`;
-    activeBots.forEach(b => {
+  // v33 fix: was scoped to coinList only, silently dropping any removed
+  // coin's entire history from this section. Now covers every coin that
+  // ever had a trade, using account state (equity) only for coins still
+  // actively tracked — a removed coin has no live equity concept, only
+  // historical trade stats from the ledger.
+  const allCoinsEverTraded = new Set([...coinList]);
+  (engine.allTradesEver || []).forEach(t => allCoinsEverTraded.add(t.coin));
+  [...allCoinsEverTraded].sort().forEach(coin => {
+    out += `\n${coin}${!coinList.includes(coin) ? " (removed — historical only)" : ""}:\n`;
+    // v36 fix: was activeBots here too — same inconsistency as strategy totals.
+    BOTS.forEach(b => {
       const acc = engine.bots[b.key].coins[coin];
-      if (!acc) return;
-      const eq = accEquity(acc);
-      const ret = ((eq - acc.initial) / acc.initial) * 100;
-      const wins = acc.trades.filter(t => t.result === "Win").length, losses = acc.trades.filter(t => t.result === "Loss").length, amb = acc.trades.filter(t => t.result === "Ambiguous").length;
-      const best = acc.trades.reduce((m, t) => t.netPnl > m ? t.netPnl : m, -Infinity);
-      const worst = acc.trades.reduce((m, t) => t.netPnl < m ? t.netPnl : m, Infinity);
-      out += `  ${b.label}: $${fmt(acc.initial)} → $${fmt(eq)} (${ret >= 0 ? "+" : ""}${fmt(ret)}%) | ${acc.trades.length} records | ${wins}W/${losses}L/${amb}A | best $${fmt(best === -Infinity ? 0 : best)} | worst $${fmt(worst === Infinity ? 0 : worst)}
-`;
+      const coinTrades = (engine.allTradesEver || []).filter(t => t.bot === b.key && t.coin === coin);
+      if (!acc && !coinTrades.length) return;
+      const wins = coinTrades.filter(t => t.result === "Win").length, losses = coinTrades.filter(t => t.result === "Loss").length;
+      const ambiguous = coinTrades.filter(t => t.result === "Ambiguous").length;
+      const best = coinTrades.reduce((m, t) => t.netPnl > m ? t.netPnl : m, -Infinity);
+      const worst = coinTrades.reduce((m, t) => t.netPnl < m ? t.netPnl : m, Infinity);
+      if (acc && coinList.includes(coin)) {
+        const eq = accEquity(acc);
+        const ret = ((eq - acc.initial) / acc.initial) * 100;
+        out += `  ${b.label}: $${fmt(acc.initial)} → $${fmt(eq)} (${ret >= 0 ? "+" : ""}${fmt(ret)}%) | ${coinTrades.length} trades | ${wins}W/${losses}L${ambiguous ? `/${ambiguous} ambiguous` : ""} | best $${fmt(best === -Infinity ? 0 : best)} | worst $${fmt(worst === Infinity ? 0 : worst)}\n`;
+      } else if (coinTrades.length) {
+        out += `  ${b.label}: (removed, no live equity) | ${coinTrades.length} trades | ${wins}W/${losses}L${ambiguous ? `/${ambiguous} ambiguous` : ""} | best $${fmt(best === -Infinity ? 0 : best)} | worst $${fmt(worst === Infinity ? 0 : worst)}\n`;
+      }
     });
   });
 
-  out += `
-=== FULL TRADE LOG ===
-`;
-  let allTrades = canonicalLedger().map(t => ({ ...t, botLabel: (BOTS.find(b => b.key === t.bot) || {label:t.bot}).label }));
+  out += `\n=== FULL TRADE LOG ===\n`;
+  let allTrades = (engine.allTradesEver || []).slice();
   allTrades.sort((a, b) => a.closedAt - b.closedAt);
   if (!allTrades.length) out += "No trades closed yet.\n";
   allTrades.forEach(t => {
@@ -2256,43 +2732,69 @@ function downloadReport() {
 }
 
 // ---------- LIVE DATA / CARDS ----------
+let refreshInProgress = false;
 async function refresh() {
+  // v33 fix: refresh() runs every 30s via setInterval, but setInterval
+  // doesn't wait for the previous call to finish — a slow network response
+  // could let a second refresh start while the first is still writing to
+  // shared state (state[], engine), racing each other and potentially
+  // letting a stale response overwrite a newer one. Guard ensures only one
+  // refresh runs at a time, wrapped in try/finally so an unexpected error
+  // can't leave it permanently stuck.
   if (refreshInProgress) return;
   refreshInProgress = true;
-  const generation = ++refreshGeneration;
-  const btn = document.getElementById("refreshBtn"); if (btn) btn.disabled = true;
-  let anySuccess = false, lastError = null;
   try {
-    await Promise.all(coinList.map(async ticker => {
+    document.getElementById("refreshBtn").disabled = true;
+    let anySuccess = false, lastError = null;
+    await Promise.all(coinList.map(async (ticker) => {
       if (!state[ticker]) state[ticker] = { closes: [], price: null };
       try {
-        const next = await analyzeCoin(ticker);
-        if (generation === refreshGeneration) state[ticker] = next;
+        state[ticker] = await analyzeCoin(ticker);
         anySuccess = true;
-      } catch (e) { lastError = e.message; if (state[ticker]) state[ticker].error = lastError; }
+      } catch (e) { lastError = e.message; if (state[ticker]) { state[ticker].error = lastError; state[ticker].stale = true; } }
     }));
+
+    // v37 fix (item 18): manual removal deleted state[coin] outright — if
+    // that coin later dropped out of the wider background scan too, any
+    // pending shadow research on it could never resolve properly again.
+    // Now: any coin with a pending blocked or continuation shadow keeps
+    // getting fetched (into wideState, the same fallback resolveShadowArray
+    // already checks) regardless of whether it's still in the visible
+    // coinList — research data collection continues independently of live
+    // trading visibility, exactly as the audit recommended.
+    const researchCoins = new Set();
+    shadowTrades.concat(continuationShadows).forEach(st => {
+      if (st.status === "pending" && !coinList.includes(st.coin)) researchCoins.add(st.coin);
+    });
+    await Promise.all([...researchCoins].map(async (ticker) => {
+      try { wideState[ticker] = await analyzeCoin(ticker); }
+      catch (e) { /* best-effort — a pending shadow just stays pending until it can resolve or times out */ }
+    }));
+
+    // BTC is always analysed — the regime filter needs it even if the user
+    // isn't tracking BTC as a tradeable coin.
     if (!coinList.includes("BTC") && !wideState["BTC"]) {
       try { wideState["BTC"] = await analyzeCoin("BTC"); } catch (e) { /* ignore */ }
     }
-    if (engine && generation === refreshGeneration) await runEngineStep();
-    document.getElementById("banner").innerHTML = anySuccess ? "" : `<div class="banner">Live futures-price fetch failed (${lastError}). Check your internet connection.</div>`;
-    document.getElementById("statusLine").textContent = "Last updated " + new Date().toLocaleTimeString() + " · auto-refresh every 30s · futures data";
+
+    if (engine) await runEngineStep();
+
+    document.getElementById("banner").innerHTML = anySuccess ? "" : `<div class="banner">Live price fetch failed (${lastError}). Check your internet connection.</div>`;
+    document.getElementById("statusLine").textContent = "Last updated " + new Date().toLocaleTimeString() + " · auto-refresh every 30s";
+    document.getElementById("refreshBtn").disabled = false;
     renderCards(); renderEngine(); renderScanner();
   } finally {
     refreshInProgress = false;
-    if (btn) btn.disabled = false;
   }
 }
 
 // Shared analysis used for BOTH your tracked coins and the wider market scan.
 async function analyzeCoin(ticker) {
   const { closes, highs, lows, volumes, times } = await fetchKlines(ticker);
-  if (closes.length < 200) throw new Error(ticker + ": insufficient futures price history");
+  // Reject newly listed / thin coins: we ask for 200 candles, so anything
+  // returning far fewer hasn't traded long enough for reliable indicators.
+  if (closes.length < 150) throw new Error(ticker + ": insufficient price history");
   const i = closes.length - 1, price = closes[i];
-  const completedCloses = closes.slice(0, -1), completedHighs = highs.slice(0, -1), completedLows = lows.slice(0, -1);
-  const confirmedPrice = completedCloses[completedCloses.length - 1];
-  const lastCompletedCandleTime = times.length >= 2 ? times[times.length - 2] : null;
-
   const shortArr = smaArr(closes, 10), longArr = smaArr(closes, 30);
   const smaSignal = (shortArr[i] !== null && longArr[i] !== null) ? (shortArr[i] > longArr[i] ? "bull" : "bear") : "neutral";
   const rsiVal = computeRSI(closes, 14);
@@ -2301,77 +2803,91 @@ async function analyzeCoin(ticker) {
   const macdSignal = macdRes.hist === null ? "neutral" : macdRes.hist > 0 ? "bull" : "bear";
   const boll = computeBollinger(closes, 20, 2);
   const bollSignal = !boll ? "neutral" : price > boll.upper ? "bear" : price < boll.lower ? "bull" : "neutral";
-
   const recent = closes.slice(-LONG_WINDOW - 1, -1);
   const support = Math.min(...recent), resistance = Math.max(...recent);
   const range = resistance - support || price * 0.01;
-  const positionInRange = range ? (price - support) / range : 0.5;
-  const confirmedPositionInRange = range ? (confirmedPrice - support) / range : 0.5;
-
   const sma96 = smaArr(closes, 96)[i];
-  const sma192Arr = smaArr(closes, 192); const sma192 = sma192Arr[i];
-  const confirmedSma96Arr = smaArr(completedCloses, 96), confirmedSma192Arr = smaArr(completedCloses, 192);
-  const confirmedSma96 = confirmedSma96Arr[confirmedSma96Arr.length - 1];
-  const confirmedSma192 = confirmedSma192Arr[confirmedSma192Arr.length - 1];
+  const sma192Arr = smaArr(closes, Math.min(192, closes.length - 1));
+  const sma192 = sma192Arr[sma192Arr.length - 1];
+  const positionInRange = range ? (price - support) / range : 0.5;
 
+  // Donchian breakout (Turtle System 1: 20 periods). Long when price breaks
+  // above the prior range high, short when it breaks below the prior low.
   const donch = computeDonchian(highs, lows, 20);
   const donchSignal = !donch ? "neutral" : price > donch.upper ? "bull" : price < donch.lower ? "bear" : "neutral";
+
+  // ATR for volatility-based stops and sizing
   const atr = computeATR(highs, lows, closes, 14);
   const atrPct = atr && price ? atr / price : null;
 
+  // Volume confirmation: is the current move backed by real participation?
+  // Used as a FILTER on other strategies rather than a standalone bot — a price
+  // move on thin volume is far more likely to be noise that reverses.
+  //
+  // v32 fix: previously compared the LATEST candle's volume — often still
+  // forming, refresh runs every 30s so it rarely lands exactly on a 15m
+  // boundary — against an average of prior COMPLETE candles. That made
+  // 0.01x-0.30x readings look normal near the start of any new candle,
+  // wrongly rejecting otherwise-ordinary volume. Now uses the most recently
+  // COMPLETED candle instead, so the comparison is apples-to-apples.
   let volRatio = null;
   if (volumes && volumes.length >= 22) {
     const lastCompleteVol = volumes[volumes.length - 2];
     const recentVols = volumes.slice(-22, -2);
-    const avgVol = recentVols.reduce((a,b)=>a+b,0) / recentVols.length;
+    const avgVol = recentVols.reduce((a, b) => a + b, 0) / recentVols.length;
     if (avgVol > 0) volRatio = lastCompleteVol / avgVol;
   }
 
-  let avgDailyRangePct = null, dailyRangeDaysUsed = 0;
-  if (completedCloses.length >= 96) {
+  // Average daily range over the last few days (96 x 15m candles = 1 day),
+  // used to judge whether a target is a move this coin realistically makes.
+  // v32: now genuinely gets up to 5 days with the increased fetch limit above
+  // (previously the code tried for 5 but data usually only allowed 2).
+  let avgDailyRangePct = null;
+  let dailyRangeDaysUsed = 0;
+  if (closes.length >= 96) {
     const dayRanges = [];
-    for (let end = completedCloses.length; end >= 96 && dayRanges.length < 5; end -= 96) {
-      const start = end - 96;
-      const dayHigh = Math.max(...completedHighs.slice(start, end));
-      const dayLow = Math.min(...completedLows.slice(start, end));
+    for (let d = closes.length - 96; d >= 0 && dayRanges.length < 5; d -= 96) {
+      const dayHigh = Math.max(...highs.slice(d, d + 96));
+      const dayLow = Math.min(...lows.slice(d, d + 96));
       if (dayLow > 0) dayRanges.push((dayHigh - dayLow) / dayLow);
     }
     dailyRangeDaysUsed = dayRanges.length;
-    if (dayRanges.length) avgDailyRangePct = dayRanges.reduce((a,b)=>a+b,0) / dayRanges.length;
+    if (dayRanges.length) avgDailyRangePct = dayRanges.reduce((a, b) => a + b, 0) / dayRanges.length;
   }
-
   const funding = await fetchFundingRate(ticker);
-  if (!funding && !coinList.includes(ticker)) throw new Error(ticker + ": no perpetual futures market");
-
-  const cRsi = computeRSI(completedCloses, 14);
-  const cMacd = computeMACD(completedCloses);
-  const confirmedIndicators = {
-    rsi: { value: cRsi, signal: cRsi === null ? "neutral" : cRsi > 70 ? "bear" : cRsi < 30 ? "bull" : "neutral" },
-    macd: { hist: cMacd.hist, histPrev: cMacd.histPrev, signal: cMacd.hist === null ? "neutral" : cMacd.hist > 0 ? "bull" : "bear" },
-  };
+  // No perpetual futures market is a decent proxy for "not a serious trading
+  // pair" — and it also means the funding-rate signal would be silently blank.
+  if (!funding && !coinList.includes(ticker)) throw new Error(ticker + ": no futures market");
 
   return {
-    closes, highs, lows, times, price, completedCloses, confirmedPrice, lastCompletedCandleTime,
+    closes, highs, lows, times, price,
+    freshAt: Date.now(), stale: false, // v37 fix (item 10): timestamp of this successful fetch, so decisions can require fresh data
     buyZoneLow: support, buyZoneHigh: support + range * 0.25,
     sellZoneLow: resistance - range * 0.25, sellZoneHigh: resistance,
-    sma96, sma192, confirmedSma96, confirmedSma192, positionInRange, confirmedPositionInRange,
-    avgDailyRangePct, dailyRangeDaysUsed, atr, atrPct, volRatio, fundingRate: funding ? funding.fundingRate : null,
-    confirmedIndicators,
+    sma96, sma192, positionInRange, avgDailyRangePct, dailyRangeDaysUsed, atr, atrPct, volRatio, fundingRate: funding ? funding.fundingRate : null,
     indicators: {
       sma: { signal: smaSignal, reading: smaSignal === "bull" ? "Short > Long" : smaSignal === "bear" ? "Short < Long" : "—" },
       rsi: { signal: rsiSignal, reading: rsiVal !== null ? rsiVal.toFixed(1) : "—", value: rsiVal },
       macd: { signal: macdSignal, reading: macdRes.hist !== null ? macdRes.hist.toFixed(2) : "—", hist: macdRes.hist, histPrev: macdRes.histPrev },
       boll: { signal: bollSignal, reading: boll ? "$" + fmt(price, decimalsFor(price)) : "—" },
       donchian: { signal: donchSignal, reading: donch ? (donchSignal === "bull" ? "Broke 20-high" : donchSignal === "bear" ? "Broke 20-low" : "Inside range") : "—" },
+      // Funding + Momentum: funding rate is the only signal here NOT derived from
+      // price — it's real positioning data. Crowded longs (very positive funding)
+      // with fading momentum is a contrarian short; the reverse is a long.
       funding: (() => {
         const f = funding ? funding.fundingRate : null;
         if (f === null || macdRes.hist === null) return { signal: "neutral", reading: "no futures data" };
-        const CROWDED = 0.005; let sig = "neutral";
+        // Threshold lowered from 0.01 to 0.005. At 0.01 it sat exactly on the
+        // typical resting funding rate (~0.010%), so the bot never fired once
+        // across two full days of testing.
+        const CROWDED = 0.005;
+        let sig = "neutral";
         if (f > CROWDED && macdRes.hist < 0) sig = "bear";
         else if (f < -CROWDED && macdRes.hist > 0) sig = "bull";
         return { signal: sig, reading: f.toFixed(3) + "%" };
       })(),
-    }, error: null,
+    },
+    error: null,
   };
 }
 
@@ -2382,7 +2898,7 @@ let lastWideScan = null;
 const WIDE_SCAN_MS = 5 * 60 * 1000; // every 5 minutes — light on the API
 
 async function fetchTopCoinsByVolume(limit) {
-  const res = await fetch("https://fapi.binance.com/fapi/v1/ticker/24hr");
+  const res = await fetch("https://api.binance.com/api/v3/ticker/24hr");
   if (!res.ok) throw new Error("ticker fetch failed");
   const all = await res.json();
   const MIN_QUOTE_VOLUME = 50e6; // $50M+ 24h volume — cuts tokenized stocks and low-cap noise
@@ -2430,7 +2946,7 @@ async function runWideScan() {
 // ---------- AUTO-TRACK FROM SCANNER ----------
 // Coins the scanner rates highly get added to your test automatically, and
 // removed again once they've cooled off (if nothing's open on them).
-const LS_AUTOADDED = "cg33_autoadded", LS_BLOCKED = "cg33_blocked";
+const LS_AUTOADDED = "tm2_autoadded", LS_BLOCKED = "tm2_blocked";
 let autoAdded = JSON.parse(localStorage.getItem(LS_AUTOADDED) || "{}");   // coin -> { addedAt, lastQualifiedAt }
 let blockedCoins = JSON.parse(localStorage.getItem(LS_BLOCKED) || "[]");   // coins the user removed by hand
 let scanActivityLog = [];
@@ -2478,10 +2994,14 @@ function autoTrackFromScan(scan) {
   saveAutoAdded();
 
   // 2. Prune auto-added coins that have cooled off and have nothing open
+  // v34 fix: also wait for pending shadow trades to resolve — this runs
+  // automatically in the background, so unlike manual removal it can't ask
+  // for confirmation; it just defers pruning until the research is done.
   Object.keys(autoAdded).forEach(coin => {
     if (!coinList.includes(coin)) { delete autoAdded[coin]; return; }
     const cooledFor = now - autoAdded[coin].lastQualifiedAt;
-    if (cooledFor > PRUNE_AFTER_MS && !coinHasOpenPosition(coin)) {
+    const hasPendingShadow = shadowTrades.concat(continuationShadows).some(st => st.coin === coin && st.status === "pending");
+    if (cooledFor > PRUNE_AFTER_MS && !coinHasOpenPosition(coin) && !hasPendingShadow) {
       coinList = coinList.filter(c => c !== coin);
       delete state[coin];
       delete autoAdded[coin];
@@ -2501,48 +3021,77 @@ function autoTrackFromScan(scan) {
 const SIGNAL_THRESHOLD = 65; // minimum score to generate a full trade plan
 
 function scoreDirection(s, dir) {
-  // Neutral 0-100 Signal Score. Components genuinely total 100 and bounded
-  // sub-scores cannot go negative or exceed their allocation.
+  // dir = "long" or "short". Returns 0-100 score for that direction.
   if (!s || s.price === null || !s.indicators) return 0;
-  const bullish = dir === "long";
   let score = 0;
-  let trendPts = 0;
-  if (s.indicators.sma.signal === (bullish ? "bull" : "bear")) trendPts += 12;
-  if (s.sma96 !== null && (bullish ? s.price > s.sma96 : s.price < s.sma96)) trendPts += 12;
-  if (s.sma192 !== null && (bullish ? s.price > s.sma192 : s.price < s.sma192)) trendPts += 11;
-  score += Math.min(trendPts, 35);
+  const bullish = dir === "long";
 
+  // Trend (40%) — short-term crossover + two longer lookback windows as a
+  // multi-timeframe proxy, all from the same price series.
+  let trendPts = 0;
+  if (s.indicators.sma.signal === (bullish ? "bull" : "bear")) trendPts += 14;
+  if (s.sma96 !== null && (bullish ? s.price > s.sma96 : s.price < s.sma96)) trendPts += 13;
+  if (s.sma192 !== null && (bullish ? s.price > s.sma192 : s.price < s.sma192)) trendPts += 13;
+  score += trendPts;
+
+  // Momentum (30%) — MACD direction + RSI positioning (avoid chasing extremes)
   let momPts = 0;
-  if (s.indicators.macd.hist !== null && (bullish ? s.indicators.macd.hist > 0 : s.indicators.macd.hist < 0)) momPts += 13;
+  if (s.indicators.macd.hist !== null && (bullish ? s.indicators.macd.hist > 0 : s.indicators.macd.hist < 0)) momPts += 15;
   const rsi = s.indicators.rsi.value;
   if (rsi !== null) {
-    if (bullish && rsi > 35 && rsi < 68) momPts += 12;
-    else if (!bullish && rsi < 65 && rsi > 32) momPts += 12;
-    else if (bullish && rsi < 30) momPts += 6;
-    else if (!bullish && rsi > 70) momPts += 6;
+    if (bullish && rsi > 35 && rsi < 68) momPts += 15;      // healthy, not overbought
+    if (!bullish && rsi < 65 && rsi > 32) momPts += 15;     // healthy, not oversold
+    if (bullish && rsi < 30) momPts += 8;                    // oversold bounce potential
+    if (!bullish && rsi > 70) momPts += 8;                   // overbought pullback potential
   }
-  score += Math.min(momPts, 25);
+  score += Math.min(momPts, 30);
 
-  const pos = Math.min(1, Math.max(0, s.positionInRange != null ? s.positionInRange : 0.5));
-  score += bullish ? (1 - pos) * 15 : pos * 15;
+  // Structure (15%) — room to run: longs want to be nearer support, shorts nearer resistance
+  // v33 fix: positionInRange isn't clamped at its source (a genuine breakout
+  // above resistance or breakdown below support can push it negative or
+  // above 1) — used raw here, that inverted the score, PENALIZING the exact
+  // breakout/breakdown setups this component should reward. Clamped for
+  // scoring only; other consumers (late-entry, reversal permission) use
+  // simple threshold comparisons that already behave sensibly unclamped.
+  let structPts = 0;
+  if (s.positionInRange !== undefined) {
+    const clampedRange = Math.max(0, Math.min(1, s.positionInRange));
+    structPts = bullish ? (1 - clampedRange) * 15 : clampedRange * 15;
+  }
+  score += structPts;
 
+  // Tradeability (15%) — is there actually enough money in this setup?
+  // Added because the score previously rated pegged/tight-range coins highly
+  // (USD1 scored 80/100 with a 0.0% stop distance). A beautiful chart with no
+  // room to move is not a trade.
   let tradePts = 0;
   if (s.atrPct) {
+    // TP3 sits at 2.5x a 2xATR stop, so expected move = 5 x ATR
     const expectedMovePct = s.atrPct * 5 * 100;
     if (expectedMovePct >= 6) tradePts = 15;
     else if (expectedMovePct >= 4) tradePts = 12;
     else if (expectedMovePct >= 2.5) tradePts = 8;
     else if (expectedMovePct >= 1.5) tradePts = 4;
+    else tradePts = 0; // too tight to be worth trading
   }
   score += tradePts;
 
-  let fundPts = 5;
+  // Funding rate (10%) — contrarian signal on crowding, where available
+  let fundPts = 5; // neutral default if no futures data
   if (s.fundingRate !== null && s.fundingRate !== undefined) {
     if (bullish) fundPts = s.fundingRate < 0 ? 10 : s.fundingRate > 0.05 ? 0 : 6;
     else fundPts = s.fundingRate > 0 ? 10 : s.fundingRate < -0.05 ? 0 : 6;
   }
   score += fundPts;
-  return Math.round(Math.min(100, Math.max(0, score)));
+
+  // v33 fix: the five components above were designed as 40+30+15+15+10 —
+  // that's 110, not 100 (an authoring error in the original percentage
+  // split). Simply capping at 100 silently compressed different setups
+  // (anything from 100-110 pre-cap) into the same ceiling, losing the
+  // ability to distinguish a good setup from an exceptional one. Rescaled
+  // to a genuine 100-point scale instead, preserving the same relative
+  // weighting between components.
+  return Math.round(Math.min(score / 1.1, 100));
 }
 
 function buildScan() {
@@ -2714,9 +3263,12 @@ function renderCards() {
       activeBots.forEach(b => { const sg = ind[b.key] && ind[b.key].signal; if (sg === "bull") bull++; if (sg === "bear") bear++; });
       const lean = bull > bear ? "bull" : bear > bull ? "bear" : "flat";
       const inTrade = engine && BOTS.some(b => toggles[b.key] && engine.bots[b.key] && engine.bots[b.key].coins[ticker] && engine.bots[b.key].coins[ticker].position);
+      // v37 fix (item 10): UI should visibly mark stale coins, not just
+      // silently exclude them from decisions behind the scenes.
+      const stale = !isFreshState(s);
       return `<div class="compact-row">
-        <span style="font-weight:600;">${ticker}${inTrade ? ` <span style="color:#4ade8f;font-size:9px;">IN TRADE</span>` : ""} <span title="Check news" onclick="window.open('${newsSearchUrl(ticker)}','_blank')" style="cursor:pointer; opacity:0.6;">🔎</span></span>
-        <span style="font-family:monospace;">${s.price ? "$" + fmt(s.price, d) : "—"}</span>
+        <span style="font-weight:600;">${ticker}${inTrade ? ` <span style="color:#4ade8f;font-size:9px;">IN TRADE</span>` : ""}${stale ? ` <span style="color:#f87189;font-size:9px;" title="Price data is stale — excluded from new-entry and protective-exit decisions until refreshed">STALE</span>` : ""} <span title="Check news" onclick="window.open('${newsSearchUrl(ticker)}','_blank')" style="cursor:pointer; opacity:0.6;">🔎</span></span>
+        <span style="font-family:monospace; ${stale ? "opacity:0.5;" : ""}">${s.price ? "$" + fmt(s.price, d) : "—"}</span>
         <span style="color:#566078;">RSI ${ind.rsi && ind.rsi.value !== null && ind.rsi.value !== undefined ? ind.rsi.value.toFixed(0) : "—"}</span>
         <span style="color:#566078;">ATR ${s.atrPct ? (s.atrPct * 100).toFixed(1) + "%" : "—"}</span>
         <span style="color:#566078;">Vol ${s.volRatio ? s.volRatio.toFixed(1) + "x" : "—"}</span>
