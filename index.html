@@ -152,7 +152,7 @@
     <div>
       <h1>Trading Monitor</h1>
       <div class="sub">Each strategy trades independently with its own $ per coin · live prices · no real money</div>
-      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v43.6 · 2026-09-10 (ChatGPT verified pre-benchmark integrity patch: durable degradation latch, atomic veto+shadow commit, shadow research retention, UI/report consistency — no strategy/filter changes)</div>
+      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v43.7 · 2026-09-11 (ChatGPT closed-candle regime integrity + compact research telemetry)</div>
     </div>
     <button id="refreshBtn">Refresh</button>
   </div>
@@ -338,7 +338,7 @@
   <div class="grid" id="cardGrid"></div>
 
   <div class="footnote" style="text-align:center;">
-    <span style="font-family:monospace; color:#4a5568; font-size:11px;">Build v43.6</span> · Full version history moved to the Excel research register — this footer no longer duplicates it.<br/>
+    <span style="font-family:monospace; color:#4a5568; font-size:11px;">Build v43.7</span> · Full version history moved to the Excel research register — this footer no longer duplicates it.<br/>
     Assumption recorded: £/$ treated as 1:1 since prices come from USDT pairs — no live FX conversion applied. Fees assumed at 0.1% per side, no funding cost modeled. Each strategy's pot per coin is fully isolated — a loss in one never affects another. Data saved only in this browser. Price/execution simulation uses Binance SPOT candles throughout; the funding-rate signal (used by Funding+Momentum and the scanner) is pulled from the separate PERPETUAL FUTURES market as a sentiment proxy only — no funding payments are simulated or applied to any P&L. Spot and futures prices can differ, so this is a proxy signal, not a futures execution model.
   </div>
 </div>
@@ -348,7 +348,7 @@
 // can actually work on them). More coins = more signals = a usable sample size
 // sooner. The exposure cap keeps total risk in check, so a wider list gives the
 // system more to choose from rather than more to pile into.
-const BUILD_TAG = "v43.6 · 2026-09-10 (ChatGPT verified pre-benchmark integrity patch — no strategy/filter changes)";
+const BUILD_TAG = "v43.7 · 2026-09-11 (ChatGPT closed-candle regime integrity + compact research telemetry)";
 
 const DEFAULT_COINS = [
   "BTC", "ETH", "SOL", "BNB", "ADA", "XRP", "DOGE", "AVAX",
@@ -360,6 +360,19 @@ const REFRESH_MS = 30000;
 const LS_COINS = "tm2_coins", LS_TOGGLES = "tm2_toggles", LS_ENGINE = "tm2_engine", LS_PERSIST_LATCH = "tm2_persistenceDegradedLatch";
 
 const FIFTEEN_MS = 15 * 60000; // one 15m candle, in ms — used for expiry-boundary checks
+
+// v43.7: regime-integrity research storage. Closed-candle records are compact
+// tuples grouped by coin (coin name is therefore not repeated in every row).
+// 499 x 15m ~= 5.2 days. Exit telemetry is transition/event based rather than
+// one row every 30s, so it remains small while preserving the old 2-refresh
+// behavior as a diagnostic counter.
+const REGIME_TELEMETRY_CAP = 499;
+const REGIME_EXIT_TELEMETRY_CAP = 1500;
+const REGIME_CODE = { bear: -1, mixed: 0, bull: 1 };
+function regimeCode(v) { return v === "bull" ? 1 : v === "bear" ? -1 : 0; }
+function regimeName(v) { return v === 1 ? "bull" : v === -1 ? "bear" : "mixed"; }
+function isPlainObject(v) { return !!v && typeof v === "object" && !Array.isArray(v); }
+function roundMaybe(v, scale) { return Number.isFinite(v) ? Math.round(v * scale) : null; }
 // v40 fix: shared validator for both real and shadow trade plans. The
 // structural target-capping logic (Long capped at resistance, Short capped
 // at support) assumed the structural level was always on the correct side
@@ -761,6 +774,92 @@ function coinRegime(s) {
   }
   return slow;
 }
+// v43.7: the v34 timestamp gate used the last CLOSED candle time, but the
+// regime value being counted still came from coinRegime(s), whose price, SMAs
+// and ROC include the currently-forming tail candle. That allowed a regime
+// observed at e.g. 14:59:30 and 15:00:20 to count as two "closed-candle"
+// confirmations even though only seconds of persistence were observed. These
+// helpers calculate the regime through closes[length-2] only. coinRegime(s) is
+// deliberately retained unchanged for live/advisory diagnostics and the scanner.
+function coinRegimeClosedComponents(s) {
+  if (!s || !s.closes || s.closes.length < 3) return { final: "mixed", slow: "mixed", roc: null, price: null, atrPct: null };
+  const closes = s.closes.slice(0, -1);
+  const highs = s.highs ? s.highs.slice(0, -1) : null;
+  const lows = s.lows ? s.lows.slice(0, -1) : null;
+  const i = closes.length - 1;
+  const price = closes[i];
+  let sma96 = null, sma192 = null, slow = "mixed";
+  if (closes.length >= 96) {
+    const a96 = smaArr(closes, 96);
+    sma96 = a96[a96.length - 1];
+  }
+  if (closes.length >= 2) {
+    const p192 = Math.min(192, closes.length - 1);
+    const a192 = smaArr(closes, p192);
+    sma192 = a192[a192.length - 1];
+  }
+  if (price && sma96 && sma192) {
+    if (price > sma96 && price > sma192) slow = "bull";
+    else if (price < sma96 && price < sma192) slow = "bear";
+  }
+  const roc = fastROC(closes);
+  let final = slow;
+  if (roc !== null) {
+    if (roc <= -1.5) final = "bear";
+    else if (roc >= 1.5) final = "bull";
+  }
+  let atrPct = null;
+  if (highs && lows && highs.length === closes.length && lows.length === closes.length) {
+    const atr = computeATR(highs, lows, closes, 14);
+    atrPct = atr && price ? atr / price : null;
+  }
+  return { final, slow, roc, price, atrPct };
+}
+function coinRegimeClosed(s) { return coinRegimeClosedComponents(s).final; }
+function coinRegimeLiveComponents(s) {
+  if (!s || !s.price) return { final: "mixed", slow: "mixed", roc: null };
+  let slow = "mixed";
+  if (s.sma96 && s.sma192) {
+    if (s.price > s.sma96 && s.price > s.sma192) slow = "bull";
+    else if (s.price < s.sma96 && s.price < s.sma192) slow = "bear";
+  }
+  const roc = fastROC(s.closes);
+  let final = slow;
+  if (roc !== null) {
+    if (roc <= -1.5) final = "bear";
+    else if (roc >= 1.5) final = "bull";
+  }
+  return { final, slow, roc };
+}
+// v43.7: build the mean-reversion permission inputs from completed candles
+// only. v34 moved its confirmation timestamp to length-2 but permission itself
+// still used the forming candle, allowing two observations seconds apart across
+// a boundary to masquerade as a fully-closed-candle confirmation.
+function closedMeanReversionState(s) {
+  if (!s || !s.closes || s.closes.length < 30) return null;
+  const closes = s.closes.slice(0, -1);
+  const volumes = s.volumes ? s.volumes.slice(0, -1) : null;
+  const i = closes.length - 1, price = closes[i];
+  const a96 = closes.length >= 96 ? smaArr(closes, 96) : null;
+  const p192 = Math.min(192, closes.length - 1);
+  const a192 = p192 >= 2 ? smaArr(closes, p192) : null;
+  const sma96 = a96 ? a96[a96.length - 1] : null;
+  const sma192 = a192 ? a192[a192.length - 1] : null;
+  const macd = computeMACD(closes);
+  const recent = closes.slice(-LONG_WINDOW - 1, -1);
+  const support = recent.length ? Math.min(...recent) : price;
+  const resistance = recent.length ? Math.max(...recent) : price;
+  const range = resistance - support || price * 0.01;
+  const positionInRange = range ? (price - support) / range : 0.5;
+  let volRatio = null;
+  if (volumes && volumes.length >= 21) {
+    const lastCompleteVol = volumes[volumes.length - 1];
+    const recentVols = volumes.slice(-21, -1);
+    const avgVol = recentVols.reduce((a,b)=>a+b,0) / recentVols.length;
+    if (avgVol > 0) volRatio = lastCompleteVol / avgVol;
+  }
+  return { price, sma96, sma192, positionInRange, volRatio, indicators: { macd } };
+}
 function computeMACD(c) {
   const e12 = ema(c, 12), e26 = ema(c, 26);
   const line = c.map((_, i) => (e12[i] !== null && e26[i] !== null) ? e12[i] - e26[i] : null);
@@ -835,6 +934,9 @@ function ensureApiHealth() {
     staleIncidents: 0, oneMinResolverFailures: 0, oneMinApiFailures: 0, bg_oneMinApiFailures: 0, realResolverUnresolved: 0, shadowResolverUnresolved: 0,
     storageErrors: 0, persistenceDegraded: false, persistenceDegradedSince: null, persistenceDegradedMs: 0, persistenceBlockedEntries: 0,
     fundingTimeouts: 0, fundingFailures: 0, trackedFundingNoMarketCoins: {},
+    regimeDiagnosticMismatchCount: 0, regimeTelemetryErrors: 0, regimeTelemetryRepairs: 0,
+    regimeTelemetryRecords: 0, regimeExitTelemetryRecords: 0, regimeLiveClosedDisagreements: 0,
+    regimeContinuityGapResets: 0, legacySameCandleExitConfirmations: 0,
     shadowCreationPaused: false, shadowCreationPausedCount: 0, // legacy fields retained for old saves/report compatibility only
     shadowCreationCurrentlyPaused: false, shadowCreationSkippedCount: 0, shadowResearchIncomplete: false,
     shadowSkippedByType: {}, shadowSkippedByBot: {}, shadowSkippedByCoin: {},
@@ -1559,6 +1661,7 @@ function startEngine() {
     startAutoAddOn: !!document.getElementById("autoTrackOn")?.checked,
     benchmarkLock, configEvents: [], shadowTrades: [], continuationShadows: [], vetoLog: [], engineEvents: [],
     ambiguousCandleCount: 0, shadowCreatedCount: 0, shadowTotals: {}, vetoTotals: {},
+    regimeStability: {}, regimeTelemetry: {}, regimeTelemetryLastCandle: {}, regimeExitTelemetry: [], regimeLiveMismatchState: {},
     _shadowTotalsMigratedV43: true, storageSoftCeilingBytes: RESEARCH_STORAGE_SOFT_CEILING_BYTES
   };
   // v43.5 B0-02: persist + verify the COMPLETE fresh baseline BEFORE adopting
@@ -1650,6 +1753,140 @@ function botSignal(botKey, ind) {
   if (!d) return "neutral";
   return d.signal;
 }
+// v43.7: compact, bounded regime research telemetry. Closed-candle tuple schema:
+// [closedOpenMs, closedRawCode, confirmedCode, streakCount, skippedCandles,
+//  closedAtrBp, closedSlowCode, closedRocBp, liveRawCode, liveSlowCode, liveRocBp]
+// Exit/event tuple schema:
+// [atMs, coin, botIndex, sideCode, positionOpenedAt, liveRawCode, closedRawCode, stableCode,
+//  legacyWrongSideStreak, formingCandleOpenMs, liveRocBp, liveSlowCode, eventCode]
+// eventCode: 0=state transition, 1=legacy two-refresh would-close, 2=actual stable closed-candle exit.
+function bumpRegimeTelemetryHealth(field, amount = 1) {
+  try {
+    const h = ensureApiHealth();
+    if (h) h[field] = (h[field] || 0) + amount;
+  } catch (_) {}
+}
+function ensureRegimeResearchStructures() {
+  if (!engine) return false;
+  let repaired = false;
+  if (!isPlainObject(engine.regimeStability)) { engine.regimeStability = {}; repaired = true; }
+  if (!isPlainObject(engine.regimeTelemetry)) { engine.regimeTelemetry = {}; repaired = true; }
+  if (!isPlainObject(engine.regimeTelemetryLastCandle)) { engine.regimeTelemetryLastCandle = {}; repaired = true; }
+  if (!Array.isArray(engine.regimeExitTelemetry)) { engine.regimeExitTelemetry = []; repaired = true; }
+  if (!isPlainObject(engine.regimeLiveMismatchState)) { engine.regimeLiveMismatchState = {}; repaired = true; }
+  if (repaired) bumpRegimeTelemetryHealth("regimeTelemetryRepairs");
+  return true;
+}
+function recordClosedRegimeTelemetry(coin, row) {
+  try {
+    if (!ensureRegimeResearchStructures() || !Array.isArray(row)) throw new Error("bad regime telemetry row");
+    if (!Array.isArray(engine.regimeTelemetry[coin])) { engine.regimeTelemetry[coin] = []; bumpRegimeTelemetryHealth("regimeTelemetryRepairs"); }
+    const arr = engine.regimeTelemetry[coin];
+    arr.push(row);
+    if (arr.length > REGIME_TELEMETRY_CAP) arr.splice(0, arr.length - REGIME_TELEMETRY_CAP);
+    bumpRegimeTelemetryHealth("regimeTelemetryRecords");
+    return true;
+  } catch (_) { bumpRegimeTelemetryHealth("regimeTelemetryErrors"); return false; }
+}
+function recordRegimeExitTelemetry(row) {
+  try {
+    if (!ensureRegimeResearchStructures() || !Array.isArray(row)) throw new Error("bad exit telemetry row");
+    engine.regimeExitTelemetry.push(row);
+    if (engine.regimeExitTelemetry.length > REGIME_EXIT_TELEMETRY_CAP) engine.regimeExitTelemetry.splice(0, engine.regimeExitTelemetry.length - REGIME_EXIT_TELEMETRY_CAP);
+    bumpRegimeTelemetryHealth("regimeExitTelemetryRecords");
+    return true;
+  } catch (_) { bumpRegimeTelemetryHealth("regimeTelemetryErrors"); return false; }
+}
+// Exact v43.6 semantics, used only when this page is managing a run started by
+// another build. New entries are already blocked by runBuildMismatch(); keeping
+// legacy exit/stability semantics avoids silently changing an in-progress v43.6 run.
+function legacyStableCoinRegime(coin, s) {
+  if (!engine.regimeStability) engine.regimeStability = {};
+  const reading = coinRegime(s);
+  const lastClosedCandleTime = (s.times && s.times.length >= 2) ? s.times[s.times.length - 2] : null;
+  const prev = engine.regimeStability[coin];
+  if (prev && prev.value === reading) {
+    if (lastClosedCandleTime !== null && lastClosedCandleTime !== prev.lastCandleTime) {
+      prev.count = (prev.count || 1) + 1;
+      prev.lastCandleTime = lastClosedCandleTime;
+    }
+  } else {
+    engine.regimeStability[coin] = { value: reading, count: 1, lastCandleTime: lastClosedCandleTime };
+  }
+  return engine.regimeStability[coin].count >= 2 ? reading : "mixed";
+}
+// Fresh-v43.7 semantics: the value and the timestamp now describe the SAME
+// completed 15m candle. A gap breaks continuity rather than incrementing an old
+// count across unseen candles. Telemetry is recorded only after a successful row
+// append; a failed row is not falsely marked as observed.
+function stableCoinRegimeClosed(coin, s) {
+  ensureRegimeResearchStructures();
+  const lastClosedCandleTime = (s && s.times && s.times.length >= 2) ? s.times[s.times.length - 2] : null;
+  if (lastClosedCandleTime === null) return "mixed";
+  let prev = engine.regimeStability[coin];
+  const sameProcessedCandle = !!(prev && prev.lastCandleTime === lastClosedCandleTime);
+
+  // If the decision state already processed this candle but a telemetry append
+  // previously failed, retry the missing telemetry row without advancing count.
+  if (sameProcessedCandle && engine.regimeTelemetryLastCandle[coin] === lastClosedCandleTime) {
+    return (prev.count || 0) >= 2 ? prev.value : "mixed";
+  }
+
+  const closed = coinRegimeClosedComponents(s);
+  const reading = sameProcessedCandle ? prev.value : closed.final;
+  let skippedCandles = 0;
+  const priorTime = prev && Number.isFinite(prev.lastCandleTime) ? prev.lastCandleTime : null;
+  if (!sameProcessedCandle && priorTime !== null && lastClosedCandleTime > priorTime) {
+    skippedCandles = Math.max(0, Math.round((lastClosedCandleTime - priorTime) / FIFTEEN_MS) - 1);
+  }
+
+  if (!sameProcessedCandle) {
+    if (prev && prev.value === reading && priorTime !== null && lastClosedCandleTime - priorTime === FIFTEEN_MS) {
+      prev.count = (prev.count || 1) + 1;
+      prev.lastCandleTime = lastClosedCandleTime;
+    } else {
+      if (prev && priorTime !== null && lastClosedCandleTime - priorTime > FIFTEEN_MS) bumpRegimeTelemetryHealth("regimeContinuityGapResets");
+      engine.regimeStability[coin] = { value: reading, count: 1, lastCandleTime: lastClosedCandleTime };
+    }
+    prev = engine.regimeStability[coin];
+  }
+
+  const cur = engine.regimeStability[coin];
+  const confirmed = (cur.count || 0) >= 2 ? cur.value : "mixed";
+  const live = coinRegimeLiveComponents(s);
+  const liveMismatch = live.final !== cur.value;
+  const reconstructionMismatch = live.final !== coinRegime(s);
+  const lastTelemetryTime = Number.isFinite(engine.regimeTelemetryLastCandle[coin]) ? engine.regimeTelemetryLastCandle[coin] : null;
+  const telemetrySkipped = lastTelemetryTime !== null && lastClosedCandleTime > lastTelemetryTime
+    ? Math.max(0, Math.round((lastClosedCandleTime - lastTelemetryTime) / FIFTEEN_MS) - 1) : skippedCandles;
+  const row = [
+    lastClosedCandleTime, regimeCode(cur.value), regimeCode(confirmed), cur.count || 0, telemetrySkipped,
+    roundMaybe(closed.atrPct, 10000), regimeCode(closed.slow), roundMaybe(closed.roc, 100),
+    regimeCode(live.final), regimeCode(live.slow), roundMaybe(live.roc, 100)
+  ];
+  if (engine.regimeTelemetryLastCandle[coin] !== lastClosedCandleTime) {
+    if (recordClosedRegimeTelemetry(coin, row)) {
+      engine.regimeTelemetryLastCandle[coin] = lastClosedCandleTime;
+      if (liveMismatch) bumpRegimeTelemetryHealth("regimeLiveClosedDisagreements");
+      if (reconstructionMismatch) bumpRegimeTelemetryHealth("regimeDiagnosticMismatchCount");
+    }
+  }
+  return confirmed;
+}
+function tradeEntryBoundarySeconds(ts) {
+  if (!Number.isFinite(ts)) return null;
+  return Math.floor((((ts % FIFTEEN_MS) + FIFTEEN_MS) % FIFTEEN_MS) / 1000);
+}
+function latestRegimeRowAtEntry(coin, openedAt) {
+  const rows = engine && engine.regimeTelemetry && engine.regimeTelemetry[coin];
+  if (!Array.isArray(rows) || !Number.isFinite(openedAt)) return null;
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const r = rows[i];
+    if (Array.isArray(r) && Number.isFinite(r[0]) && r[0] + FIFTEEN_MS <= openedAt) return r;
+  }
+  return null;
+}
+
 function runBuildMismatch() {
   // A run with no frozen startBuildTag is not reproducible under this build.
   // Treat missing provenance the same as a genuine build mismatch for NEW
@@ -1670,40 +1907,22 @@ async function runEngineStep() {
   // sharp move happens, instead of waiting for the average to catch up.
   // (fastROC and coinRegime now defined globally, above — used here via closure)
 
-  // v29: Regime stability requirement for NEW ENTRIES. v27 already required
-  // 2 consecutive checks before CLOSING a position on a regime flip — but
-  // nothing stopped a trend bot from OPENING on a regime reading that itself
-  // was about to flip back. "Regime changed" is not the same as "regime
-  // confirmed". Computed once per coin per tick (not per bot) so the
-  // consecutive-count is accurate rather than inflated by being called once
-  // per active strategy.
-  //
-  // v34 fix: v32's fix required the candle timestamp to advance, but still
-  // used s.times[length-1] — the CURRENTLY FORMING candle, not a completed
-  // one. So "confirmed across a candle boundary" could still mean "a new
-  // candle started 5 seconds ago," not "a full candle actually closed."
-  // Now uses the last CLOSED candle (length-2, since the tail entry is
-  // always still forming) — genuine confirmed-candle-close confirmation.
-  if (!engine.regimeStability) engine.regimeStability = {};
-  function stableCoinRegime(coin, s) {
-    const reading = coinRegime(s);
-    const lastClosedCandleTime = (s.times && s.times.length >= 2) ? s.times[s.times.length - 2] : null;
-    const prev = engine.regimeStability[coin];
-    if (prev && prev.value === reading) {
-      if (lastClosedCandleTime !== null && lastClosedCandleTime !== prev.lastCandleTime) {
-        prev.count = (prev.count || 1) + 1;
-        prev.lastCandleTime = lastClosedCandleTime;
-      }
-      // same closed candle as last check — don't inflate the count on a repeat read
-    } else {
-      engine.regimeStability[coin] = { value: reading, count: 1, lastCandleTime: lastClosedCandleTime };
-    }
-    // Unconfirmed readings are treated as "mixed" (no new trend entries) —
-    // same safe default already used for genuinely indecisive regimes.
-    return engine.regimeStability[coin].count >= 2 ? reading : "mixed";
-  }
+  // v43.7: closed-candle regime integrity. v34 correctly keyed the count to
+  // the last closed candle timestamp, but still counted coinRegime(s), which
+  // includes the forming candle. Fresh v43.7 runs now count a regime computed
+  // entirely from completed candles, and any observation gap breaks continuity.
+  // When this page is opened over an older-build run, new entries are blocked
+  // by build provenance and the legacy stability semantics are retained for the
+  // old run rather than silently changing it mid-benchmark.
+  const regimeIntegrityModeActive = !runBuildMismatch() && engine.startBuildTag === BUILD_TAG;
+  if (regimeIntegrityModeActive) ensureRegimeResearchStructures();
   const stableRegimeByCoin = {};
-  coinList.forEach(c2 => { if (state[c2]) stableRegimeByCoin[c2] = stableCoinRegime(c2, state[c2]); });
+  coinList.forEach(c2 => {
+    if (!state[c2]) return;
+    stableRegimeByCoin[c2] = regimeIntegrityModeActive
+      ? stableCoinRegimeClosed(c2, state[c2])
+      : legacyStableCoinRegime(c2, state[c2]);
+  });
 
   // v29: RSI/Bollinger "earn permission" instead of a blanket regime exemption.
   // Oversold doesn't automatically mean buy — in a strong trend, RSI can stay
@@ -2001,51 +2220,78 @@ async function runEngineStep() {
   // history has been checked — never preempting an accurate historical result
   // with a cruder, current-price-only decision.
   //
-  // 1. Regime flip: each coin's OWN direction reversed, so exit positions
-  //    fighting it. Uses per-coin regime now, not one BTC signal for everything.
-  //    RSI and Bollinger are exempt — they're mean-reversion strategies designed
-  //    to trade AGAINST short-term direction, so forcing them to obey a trend
-  //    filter defeats their purpose.
-  //
-  // v27 fix: requires the mismatch to hold for 2 CONSECUTIVE checks (~60s)
-  // before closing. Evidence: a fresh v26 run showed FIL and MARSCOIN opening
-  // and regime-flip-exiting 31 seconds apart on sub-1% price noise — the fast
-  // 1h rate-of-change trigger has no hysteresis, so a value sitting near its
-  // ±1.5% threshold can cross back and forth on ordinary noise, closing real
-  // positions and charging real fees for nothing. This doesn't slow down
-  // genuine reversals meaningfully (60s vs instant) but filters out the
-  // single-tick noise case.
+  // 1. Regime flip. Fresh v43.7 runs use the SAME confirmed closed-candle
+  // regime semantics for protection that they use for entry gating. This removes
+  // the old asymmetry where a position could open on a boundary-sensitive regime
+  // then be closed by two 30-second reads of the same still-forming candle. The
+  // original live 2-refresh behavior is still measured below as diagnostic
+  // telemetry so we can quantify how often it WOULD have closed intra-candle.
+  // When managing a run started by an older build, retain the exact legacy exit
+  // behavior; build mismatch already blocks new entries.
   if (engine.useRegimeFilter !== false) {
     let flipClosed = 0;
-    BOTS.forEach(bot => {
-      // v32 fix: no toggle check here — a toggle controls NEW entries, not
-      // whether an already-open position keeps getting protected. Toggling a
-      // strategy off used to silently strip regime-flip protection from any
-      // position it still had open.
+    BOTS.forEach((bot, botIndex) => {
       if (bot.key === "rsi" || bot.key === "boll") return; // exempt mean-reversion
       coinList.forEach(coin => {
         const acc = engine.bots[bot.key].coins[coin];
         const s = state[coin];
         if (!acc || !acc.position || !s || !s.price) return;
-        // v37 fix (item 10): a stale price shouldn't drive a force-close
-        // decision — wait for fresh data rather than acting on old info.
         if (!isFreshState(s)) return;
         const p = acc.position;
-        const coinReg = coinRegime(s);
-        const wrongSide = (coinReg === "bear" && p.side === "Long") ||
-                          (coinReg === "bull" && p.side === "Short");
-        if (wrongSide) {
-          p.regimeMismatchCount = (p.regimeMismatchCount || 0) + 1;
-        } else {
-          p.regimeMismatchCount = 0;
+
+        if (!regimeIntegrityModeActive) {
+          const coinReg = coinRegime(s);
+          const wrongSide = (coinReg === "bear" && p.side === "Long") || (coinReg === "bull" && p.side === "Short");
+          if (wrongSide) p.regimeMismatchCount = (p.regimeMismatchCount || 0) + 1;
+          else p.regimeMismatchCount = 0;
+          if (p.regimeMismatchCount >= 2) {
+            closeFullPosition(acc, p, s.price, `Regime flipped to ${coinReg} (confirmed)`, Date.now(), engine);
+            flipClosed++;
+          }
+          return;
         }
-        if (p.regimeMismatchCount >= 2) {
-          closeFullPosition(acc, p, s.price, `Regime flipped to ${coinReg} (confirmed)`, Date.now(), engine);
+
+        const live = coinRegimeLiveComponents(s);
+        const closedRaw = engine.regimeStability[coin] ? engine.regimeStability[coin].value : coinRegimeClosed(s);
+        const stableReg = stableRegimeByCoin[coin] || "mixed";
+        const liveWrong = (live.final === "bear" && p.side === "Long") || (live.final === "bull" && p.side === "Short");
+        const stableWrong = (stableReg === "bear" && p.side === "Long") || (stableReg === "bull" && p.side === "Short");
+        const key = `${bot.key}|${coin}`;
+        let ms = engine.regimeLiveMismatchState[key];
+        if (!isPlainObject(ms) || ms.positionOpenedAt !== p.openedAt || ms.side !== p.side) {
+          ms = { streak: 0, firstWrongCandle: null, sig: null, positionOpenedAt: p.openedAt, side: p.side };
+        }
+        const formingCandle = (s.times && s.times.length) ? s.times[s.times.length - 1] : null;
+        const before = ms.streak || 0;
+        if (liveWrong) {
+          if (!before) ms.firstWrongCandle = formingCandle;
+          ms.streak = Math.min(2, before + 1);
+        } else {
+          ms.streak = 0; ms.firstWrongCandle = null;
+        }
+        const legacyWouldClose = liveWrong && before < 2 && ms.streak === 2;
+        const sameCandleLegacy = legacyWouldClose && ms.firstWrongCandle !== null && ms.firstWrongCandle === formingCandle;
+        if (sameCandleLegacy) bumpRegimeTelemetryHealth("legacySameCandleExitConfirmations");
+        const eventCode = stableWrong ? 2 : legacyWouldClose ? 1 : 0;
+        const sig = `${regimeCode(live.final)}|${regimeCode(closedRaw)}|${regimeCode(stableReg)}|${ms.streak}|${formingCandle}|${eventCode}`;
+        if (sig !== ms.sig || eventCode) {
+          const kept = recordRegimeExitTelemetry([
+            Date.now(), coin, botIndex, p.side === "Long" ? 1 : -1, p.openedAt, regimeCode(live.final),
+            regimeCode(closedRaw), regimeCode(stableReg), ms.streak, formingCandle,
+            roundMaybe(live.roc, 100), regimeCode(live.slow), eventCode
+          ]);
+          if (kept) ms.sig = sig;
+        }
+        engine.regimeLiveMismatchState[key] = ms;
+        p.regimeMismatchCount = 0; // legacy counter is diagnostic-only in fresh v43.7 runs
+
+        if (stableWrong) {
+          closeFullPosition(acc, p, s.price, `Regime flipped to ${stableReg} (confirmed closed candles)`, Date.now(), engine);
           flipClosed++;
         }
       });
     });
-    if (flipClosed) logEngineEvent(`Regime check closed ${flipClosed} position(s) now fighting their coin's own trend (confirmed over 2 checks).`);
+    if (flipClosed) logEngineEvent(`Regime check closed ${flipClosed} position(s) after a confirmed closed-candle regime reversal.`);
   }
 
   // 1b. Per-position early-exit trip-wire — independent of the portfolio-level
@@ -2352,13 +2598,13 @@ async function runEngineStep() {
         // permission via checkMeanReversionPermission above, AND that
         // permission must hold for 2 consecutive checks before entering,
         // same "one reading isn't enough" principle used elsewhere.
-        // v34 fix: same fix as trend regime stability — was using the
-        // CURRENTLY FORMING candle's timestamp, so "confirmed across a
-        // candle boundary" could mean a new candle started seconds ago, not
-        // that a full candle actually closed. Now uses the last CLOSED
-        // candle (length-2) — genuine confirmed-candle-close confirmation.
+        // v43.7 closes the remaining v34 gap: both the confirmation timestamp
+        // AND the permission inputs now come from completed candles on fresh
+        // v43.7 runs. A gap also resets the confirmation count instead of
+        // incrementing across unseen candles.
         if (bot.key === "rsi" || bot.key === "boll") {
-          const permission = checkMeanReversionPermission(s, side);
+          const closedPermissionState = regimeIntegrityModeActive ? closedMeanReversionState(s) : s;
+          const permission = checkMeanReversionPermission(closedPermissionState || s, side);
           const confirmKey = `${bot.key}_${coin}_${side}`;
           if (!engine.reversalConfirm) engine.reversalConfirm = {};
           const lastClosedCandleTime = (s.times && s.times.length >= 2) ? s.times[s.times.length - 2] : null;
@@ -2368,14 +2614,21 @@ async function runEngineStep() {
             return;
           }
           const prevConfirm = engine.reversalConfirm[confirmKey];
-          if (prevConfirm && prevConfirm.count > 0 && lastClosedCandleTime !== null && lastClosedCandleTime !== prevConfirm.lastCandleTime) {
-            engine.reversalConfirm[confirmKey] = { count: prevConfirm.count + 1, lastCandleTime: lastClosedCandleTime };
+          if (prevConfirm && prevConfirm.count > 0 && lastClosedCandleTime !== null) {
+            const delta = Number.isFinite(prevConfirm.lastCandleTime) ? lastClosedCandleTime - prevConfirm.lastCandleTime : null;
+            if (delta === FIFTEEN_MS) {
+              engine.reversalConfirm[confirmKey] = { count: prevConfirm.count + 1, lastCandleTime: lastClosedCandleTime };
+            } else if (delta !== 0) {
+              // A gap or non-consecutive candle breaks proof of continuity.
+              engine.reversalConfirm[confirmKey] = { count: 1, lastCandleTime: lastClosedCandleTime };
+            }
           } else if (!prevConfirm || !prevConfirm.count) {
             engine.reversalConfirm[confirmKey] = { count: 1, lastCandleTime: lastClosedCandleTime };
           }
-          // else: same closed candle as last check — don't inflate the count
+          // Same closed candle: do not inflate. Fresh v43.7 uses permission
+          // computed from that closed candle too, so count and evidence align.
           if (engine.reversalConfirm[confirmKey].count < 2) {
-            blockCandidate("reversal_unconfirmed", "Reversal setup looks valid — needs to hold across a fully-closed candle before entering (confirmed-candle confirmation)");
+            blockCandidate("reversal_unconfirmed", "Reversal setup looks valid — needs two consecutive fully-closed candles before entering");
             return;
           }
         }
@@ -2584,10 +2837,17 @@ async function runEngineStep() {
 
         // Snapshot of key indicator values at entry — lets a later review tell
         // "strategy was right but got unlucky" apart from "signal itself was weak".
+        const entryClosedRegime = coinRegimeClosedComponents(s);
+        const entryStableRegime = (bot.key !== "rsi" && bot.key !== "boll") ? (stableRegimeByCoin[coin] || "mixed") : "exempt";
         const entrySnapshot = {
           rsi: s.indicators.rsi.value,
           macdHist: s.indicators.macd.hist,
-          regime: (bot.key !== "rsi" && bot.key !== "boll") ? coinRegime(s) : "exempt",
+          regime: entryStableRegime,
+          liveRegime: coinRegime(s),
+          closedRawRegime: entryClosedRegime.final,
+          regimeAgeCandles: (bot.key !== "rsi" && bot.key !== "boll" && engine.regimeStability[coin]) ? (engine.regimeStability[coin].count || 0) : null,
+          entryBoundarySeconds: tradeEntryBoundarySeconds(Date.now()),
+          closedRocPct: entryClosedRegime.roc,
           atrPct: s.atrPct,
           volRatio: s.volRatio,
         };
@@ -3834,6 +4094,8 @@ function generateReport() {
     out += `1-minute API unavailability: ${h.oneMinApiFailures || 0} raw failed/unavailable fetch window(s) (${h.bg_oneMinApiFailures || 0} on background/removed symbols)\n`;
     out += `1-minute outcome impact: ${h.realResolverUnresolved || 0} real-position resolution(s) degraded | ${h.shadowResolverUnresolved || 0} shadow-only resolution(s) degraded — purpose, not coin membership, drives the verdicts below\n`;
     out += `Storage errors: ${h.storageErrors}${h.persistenceDegraded ? ` | ${storageProblemLabel()} — time in degraded state: ${(degradedMs/60000).toFixed(1)} min (new entries were paused during this period)` : ""}${h.persistenceBlockedEntries ? ` | ${h.persistenceBlockedEntries} entry attempt(s) blocked by degraded storage (infrastructure, not a trading filter — excluded from veto/shadow research)` : ""}\n`;
+    out += `Regime telemetry: ${h.regimeTelemetryRecords || 0} closed-candle record(s) | ${h.regimeExitTelemetryRecords || 0} exit/transition event(s) | ${h.regimeTelemetryErrors || 0} error(s) | ${h.regimeTelemetryRepairs || 0} structure repair(s)\n`;
+    out += `Regime diagnostics: live-vs-closed disagreement ${h.regimeLiveClosedDisagreements || 0} | continuity-gap resets ${h.regimeContinuityGapResets || 0} | diagnostic reconstruction mismatches ${h.regimeDiagnosticMismatchCount || 0} | legacy same-candle 2-refresh exit confirmations ${h.legacySameCandleExitConfirmations || 0}\n`;
     // v41.2 fix (A2): a cycle that never even STARTED (browser suspension,
     // the Mac sleeping) previously left zero trace — cyclesAttempted only
     // increments when refresh() begins, so a 100% full-sync rate could
@@ -3871,6 +4133,71 @@ function generateReport() {
     const fundingClean = (h.fundingTimeouts || 0) === 0 && (h.fundingFailures || 0) === 0;
     out += `Funding+Momentum signal availability: ${fundingClean ? "Clean — no funding-data interruptions" : "Degraded — see Funding API reliability above; treat Funding+Momentum's evidence as incomplete for any interrupted period, independent of the Spot verdict above"}\n\n`;
   }
+
+  // v43.7: make the compact regime telemetry usable directly from the normal
+  // downloaded report; no need to inspect localStorage manually.
+  out += `=== REGIME BOUNDARY / CLOSED-CANDLE TELEMETRY ===\n`;
+  const rtObj = isPlainObject(engine.regimeTelemetry) ? engine.regimeTelemetry : {};
+  const rtCoins = Object.keys(rtObj).sort();
+  let rtTotal = 0, rtGapRows = 0, rtDisagreeRows = 0;
+  rtCoins.forEach(c => {
+    const rows = Array.isArray(rtObj[c]) ? rtObj[c] : [];
+    rtTotal += rows.length;
+    let rawChanges = 0, confirmedChanges = 0, gaps = 0, disagreements = 0;
+    let prevRaw = null, prevConf = null;
+    const episodes = []; let epCode = null, epLen = 0;
+    rows.forEach(r => {
+      if (!Array.isArray(r) || r.length < 11) return;
+      if (prevRaw !== null && r[1] !== prevRaw) rawChanges++;
+      if (prevConf !== null && r[2] !== prevConf) confirmedChanges++;
+      prevRaw = r[1]; prevConf = r[2];
+      if ((r[4] || 0) > 0) gaps++;
+      if (r[1] !== r[8]) disagreements++;
+      if (r[2] === 1 || r[2] === -1) {
+        if (epCode === r[2]) epLen++;
+        else { if (epLen) episodes.push(epLen); epCode = r[2]; epLen = 1; }
+      } else { if (epLen) episodes.push(epLen); epCode = null; epLen = 0; }
+    });
+    if (epLen) episodes.push(epLen);
+    rtGapRows += gaps; rtDisagreeRows += disagreements;
+    const sortedEp = episodes.slice().sort((a,b)=>a-b);
+    const medianEp = sortedEp.length ? sortedEp[Math.floor(sortedEp.length/2)] : null;
+    const coverageH = rows.length > 1 ? ((rows[rows.length-1][0] - rows[0][0] + FIFTEEN_MS) / 3600000) : rows.length ? 0.25 : 0;
+    const rawPerDay = coverageH > 0 ? rawChanges * 24 / coverageH : 0;
+    const confPerDay = coverageH > 0 ? confirmedChanges * 24 / coverageH : 0;
+    out += `${c}: ${rows.length} closed candles | coverage ${coverageH.toFixed(1)}h | raw changes ${rawChanges} (${rawPerDay.toFixed(1)}/day) | confirmed changes ${confirmedChanges} (${confPerDay.toFixed(1)}/day) | median confirmed spell ${medianEp == null ? "n/a" : medianEp + " candle(s)"} | gap rows ${gaps} | live/closed disagreements ${disagreements}\n`;
+  });
+  if (!rtCoins.length) out += `No v43.7 closed-candle regime telemetry recorded yet.\n`;
+  const rx = Array.isArray(engine.regimeExitTelemetry) ? engine.regimeExitTelemetry : [];
+  const legacyWouldClose = rx.filter(r => Array.isArray(r) && r[12] === 1).length;
+  const actualStableExits = rx.filter(r => Array.isArray(r) && r[12] === 2).length;
+  const hReg = ensureApiHealth();
+  out += `Totals: ${rtTotal} closed-candle rows | gap rows ${rtGapRows} | live-vs-closed disagreement rows ${rtDisagreeRows}\n`;
+  out += `Exit diagnostics: ${rx.length} transition/event rows | legacy two-refresh would-close events ${legacyWouldClose} | same-forming-candle legacy confirmations ${hReg ? (hReg.legacySameCandleExitConfirmations || 0) : 0} | actual stable closed-candle exits ${actualStableExits}\n`;
+  const teleClean = hReg && !(hReg.regimeTelemetryErrors || hReg.regimeDiagnosticMismatchCount);
+  out += `Regime telemetry integrity: ${teleClean ? "CLEAN" : "INCOMPLETE / CHECK ERRORS"} | errors ${hReg ? (hReg.regimeTelemetryErrors || 0) : 0} | reconstruction mismatches ${hReg ? (hReg.regimeDiagnosticMismatchCount || 0) : 0}\n`;
+  try { out += `Current browser localStorage estimate: ${(estimateLocalStorageBytes()/1024/1024).toFixed(2)} MB | research soft ceiling ${(RESEARCH_STORAGE_SOFT_CEILING_BYTES/1024/1024).toFixed(2)} MB\n`; } catch (_) {}
+
+  out += `\n=== TRADE / REGIME LINKAGE (v43.7 telemetry window only) ===\n`;
+  const linkTrades = (engine.allTradesEver || []).filter(t => Number.isFinite(t.openedAt));
+  let linkedN = 0;
+  linkTrades.forEach(t => {
+    const r = latestRegimeRowAtEntry(t.coin, t.openedAt);
+    if (!r) return;
+    linkedN++;
+    const entrySec = tradeEntryBoundarySeconds(t.openedAt);
+    const sideCode = t.side === "Long" ? 1 : -1;
+    const ageCandles = r[2] === sideCode ? r[3] : 0;
+    const override = Number.isFinite(r[7]) && Math.abs(r[7]) >= 150 ? "yes" : "no";
+    out += `${t.botLabel || t.bot} ${t.coin} ${t.side} | score ${t.entryScore == null ? "n/a" : t.entryScore} | entry +${entrySec}s after 15m boundary | confirmed-regime age ${ageCandles} candle(s) | closed ROC ${r[7] == null ? "n/a" : (r[7]/100).toFixed(2)+"%"} | ROC override ${override} | MFE ${t.mfePct == null ? "n/a" : t.mfePct.toFixed(2)+"%"} | MAE ${t.maePct == null ? "n/a" : t.maePct.toFixed(2)+"%"} | ${t.result || "open"}\n`;
+  });
+  if (!linkedN) out += `No completed trade currently overlaps the v43.7 telemetry window.\n`;
+  out += `\nCompact closed-candle tuple schema: [closedOpenMs, closedRaw, confirmed, streak, skipped, ATRbp, closedSlow, closedROCbp, liveRaw, liveSlow, liveROCbp]; regime codes -1=bear, 0=mixed, 1=bull.\n`;
+  out += `Compact exit tuple schema: [atMs, coin, botIndex, side, positionOpenedAt, liveRaw, closedRaw, stable, legacyStreak, formingCandleOpenMs, liveROCbp, liveSlow, event]; event 0=state transition, 1=legacy 2-refresh would-close, 2=actual stable exit.\n`;
+  // Include bounded compact raw arrays so later forensic analysis can be done
+  // from the downloaded report without browser/localStorage access.
+  rtCoins.forEach(c => { out += `REGIME_RAW ${c} ${JSON.stringify(rtObj[c])}\n`; });
+  out += `REGIME_EXIT_RAW ${JSON.stringify(rx)}\n\n`;
 
   out += `=== DECISION LOG — CUMULATIVE TOTALS FOR THIS RUN (why trades were rejected) ===\n`;
   out += `These counts are cumulative for the whole run, not limited by the 500-record detail cap below.\n`;
@@ -4129,7 +4456,7 @@ function generateReport() {
     const mfeStr = (t.mfePct !== undefined) ? fmt(t.mfePct, 2) + "%" : "n/a";
     const concStr = (t.concurrentOpen !== undefined) ? `${t.concurrentOpen} open (${t.concurrentLong}L/${t.concurrentShort}S)` : "n/a";
     const snap = t.entrySnapshot || {};
-    const snapStr = `RSI ${snap.rsi != null ? snap.rsi.toFixed(1) : "n/a"}, MACD hist ${snap.macdHist != null ? snap.macdHist.toFixed(3) : "n/a"}, regime ${snap.regime || "n/a"}, ATR ${snap.atrPct != null ? (snap.atrPct*100).toFixed(2)+"%" : "n/a"}, vol ${snap.volRatio != null ? snap.volRatio.toFixed(2)+"x" : "n/a"}`;
+    const snapStr = `RSI ${snap.rsi != null ? snap.rsi.toFixed(1) : "n/a"}, MACD hist ${snap.macdHist != null ? snap.macdHist.toFixed(3) : "n/a"}, stable regime ${snap.regime || "n/a"}, live regime ${snap.liveRegime || "n/a"}, closed raw ${snap.closedRawRegime || "n/a"}, regime age ${snap.regimeAgeCandles != null ? snap.regimeAgeCandles+" candles" : "n/a"}, boundary +${snap.entryBoundarySeconds != null ? snap.entryBoundarySeconds+"s" : "n/a"}, closed ROC ${snap.closedRocPct != null ? snap.closedRocPct.toFixed(2)+"%" : "n/a"}, ATR ${snap.atrPct != null ? (snap.atrPct*100).toFixed(2)+"%" : "n/a"}, vol ${snap.volRatio != null ? snap.volRatio.toFixed(2)+"x" : "n/a"}`;
     const clusterStr = (t.sameCoinSameSideOtherBots && t.sameCoinSameSideOtherBots.length) ? `Also open on this coin+direction: ${t.sameCoinSameSideOtherBots.join(", ")}` : "No other strategy on this coin+direction";
     out += `[${new Date(t.closedAt).toLocaleString()}] ${t.botLabel} | ${t.coin} ${t.side} | Entered: ${entryTimeStr} | Duration: ${durStr} | Reason for entry: ${t.reason || "n/a"} | Score at entry: ${t.entryScore == null ? "n/a" : t.entryScore} | Entry $${fmt(t.entry, pd)} Stop $${fmt(t.stop, pd)} Target $${fmt(t.target, pd)} | Lev ${t.leverage}x | R:R ${fmt(t.riskReward, 1)} | MAE ${maeStr} MFE ${mfeStr} | Concurrent: ${concStr} | Cluster: ${clusterStr} | Entry snapshot: ${snapStr} | Exit $${fmt(t.exitPrice, pd)} (${t.exitReason}) | Gross $${fmt(t.grossPnl)} Fees $${fmt(t.fees)} Net $${fmt(t.netPnl)} | Balance after $${fmt(t.balanceAfter)} | ${t.result}\n`;
   });
