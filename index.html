@@ -152,7 +152,7 @@
     <div>
       <h1>Trading Monitor</h1>
       <div class="sub">Each strategy trades independently with its own $ per coin · live prices · no real money</div>
-      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v43.7 · 2026-09-11 (ChatGPT closed-candle regime integrity + compact research telemetry)</div>
+      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v43.8 · 2026-09-12 (ChatGPT Donchian fresh-breakout re-arm + event-level research instrumentation)</div>
     </div>
     <button id="refreshBtn">Refresh</button>
   </div>
@@ -338,7 +338,7 @@
   <div class="grid" id="cardGrid"></div>
 
   <div class="footnote" style="text-align:center;">
-    <span style="font-family:monospace; color:#4a5568; font-size:11px;">Build v43.7</span> · Full version history moved to the Excel research register — this footer no longer duplicates it.<br/>
+    <span style="font-family:monospace; color:#4a5568; font-size:11px;">Build v43.8</span> · Full version history moved to the Excel research register — this footer no longer duplicates it.<br/>
     Assumption recorded: £/$ treated as 1:1 since prices come from USDT pairs — no live FX conversion applied. Fees assumed at 0.1% per side, no funding cost modeled. Each strategy's pot per coin is fully isolated — a loss in one never affects another. Data saved only in this browser. Price/execution simulation uses Binance SPOT candles throughout; the funding-rate signal (used by Funding+Momentum and the scanner) is pulled from the separate PERPETUAL FUTURES market as a sentiment proxy only — no funding payments are simulated or applied to any P&L. Spot and futures prices can differ, so this is a proxy signal, not a futures execution model.
   </div>
 </div>
@@ -348,7 +348,7 @@
 // can actually work on them). More coins = more signals = a usable sample size
 // sooner. The exposure cap keeps total risk in check, so a wider list gives the
 // system more to choose from rather than more to pile into.
-const BUILD_TAG = "v43.7 · 2026-09-11 (ChatGPT closed-candle regime integrity + compact research telemetry)";
+const BUILD_TAG = "v43.8 · 2026-09-12 (ChatGPT Donchian fresh-breakout re-arm + event-level research instrumentation)";
 
 const DEFAULT_COINS = [
   "BTC", "ETH", "SOL", "BNB", "ADA", "XRP", "DOGE", "AVAX",
@@ -934,7 +934,7 @@ function ensureApiHealth() {
     staleIncidents: 0, oneMinResolverFailures: 0, oneMinApiFailures: 0, bg_oneMinApiFailures: 0, realResolverUnresolved: 0, shadowResolverUnresolved: 0,
     storageErrors: 0, persistenceDegraded: false, persistenceDegradedSince: null, persistenceDegradedMs: 0, persistenceBlockedEntries: 0,
     fundingTimeouts: 0, fundingFailures: 0, trackedFundingNoMarketCoins: {},
-    regimeDiagnosticMismatchCount: 0, regimeTelemetryErrors: 0, regimeTelemetryRepairs: 0,
+    regimeDiagnosticMismatchCount: 0, regimeTelemetryErrors: 0, regimeTelemetryRepairs: 0, regimeTelemetryCoinInitializations: 0,
     regimeTelemetryRecords: 0, regimeExitTelemetryRecords: 0, regimeLiveClosedDisagreements: 0,
     regimeContinuityGapResets: 0, legacySameCandleExitConfirmations: 0,
     shadowCreationPaused: false, shadowCreationPausedCount: 0, // legacy fields retained for old saves/report compatibility only
@@ -1652,7 +1652,7 @@ function startEngine() {
   const useVolumeFilter = document.getElementById("engVolFilter")?.value === "1";
   const cooldownMinutes = parseInt(document.getElementById("engCooldown")?.value) || 0;
   const bots = {};
-  BOTS.forEach(b => { bots[b.key] = { coins: {} }; coinList.forEach(c => { bots[b.key].coins[c] = { cash: perCoinCapital, initial: perCoinCapital, position: null, trades: [] }; }); });
+  BOTS.forEach(b => { bots[b.key] = { coins: {} }; coinList.forEach(c => { bots[b.key].coins[c] = { cash: perCoinCapital, initial: perCoinCapital, position: null, trades: [], ...(b.key === "donchian" ? { donchianRearm: { Long: null, Short: null } } : {}) }; }); });
   const newEngine = {
     startedAt: Date.now(), perCoinCapital, leverage, allowShorts, minProfit, maxHoldHours,
     useRegimeFilter, circuitBreakerPct, maxSameDirection, useVolumeFilter, cooldownMinutes,
@@ -1660,7 +1660,7 @@ function startEngine() {
     startBuildTag: BUILD_TAG, startCoinList: coinList.slice(), startToggles: { ...toggles },
     startAutoAddOn: !!document.getElementById("autoTrackOn")?.checked,
     benchmarkLock, configEvents: [], shadowTrades: [], continuationShadows: [], vetoLog: [], engineEvents: [],
-    ambiguousCandleCount: 0, shadowCreatedCount: 0, shadowTotals: {}, vetoTotals: {},
+    ambiguousCandleCount: 0, shadowCreatedCount: 0, shadowResearchOnlyCreatedCount: 0, shadowTotals: {}, vetoTotals: {},
     regimeStability: {}, regimeTelemetry: {}, regimeTelemetryLastCandle: {}, regimeExitTelemetry: [], regimeLiveMismatchState: {},
     _shadowTotalsMigratedV43: true, storageSoftCeilingBytes: RESEARCH_STORAGE_SOFT_CEILING_BYTES
   };
@@ -1744,7 +1744,7 @@ function ensureCoinInEngine(coin) {
   if (!engine) return;
   BOTS.forEach(b => {
     if (!engine.bots[b.key].coins[coin]) {
-      engine.bots[b.key].coins[coin] = { cash: engine.perCoinCapital, initial: engine.perCoinCapital, position: null, trades: [] };
+      engine.bots[b.key].coins[coin] = { cash: engine.perCoinCapital, initial: engine.perCoinCapital, position: null, trades: [], ...(b.key === "donchian" ? { donchianRearm: { Long: null, Short: null } } : {}) };
     }
   });
 }
@@ -1753,7 +1753,7 @@ function botSignal(botKey, ind) {
   if (!d) return "neutral";
   return d.signal;
 }
-// v43.7: compact, bounded regime research telemetry. Closed-candle tuple schema:
+// v43.8 retains v43.7 compact, bounded regime research telemetry. Closed-candle tuple schema:
 // [closedOpenMs, closedRawCode, confirmedCode, streakCount, skippedCandles,
 //  closedAtrBp, closedSlowCode, closedRocBp, liveRawCode, liveSlowCode, liveRocBp]
 // Exit/event tuple schema:
@@ -1780,7 +1780,7 @@ function ensureRegimeResearchStructures() {
 function recordClosedRegimeTelemetry(coin, row) {
   try {
     if (!ensureRegimeResearchStructures() || !Array.isArray(row)) throw new Error("bad regime telemetry row");
-    if (!Array.isArray(engine.regimeTelemetry[coin])) { engine.regimeTelemetry[coin] = []; bumpRegimeTelemetryHealth("regimeTelemetryRepairs"); }
+    if (!Array.isArray(engine.regimeTelemetry[coin])) { engine.regimeTelemetry[coin] = []; bumpRegimeTelemetryHealth("regimeTelemetryCoinInitializations"); }
     const arr = engine.regimeTelemetry[coin];
     arr.push(row);
     if (arr.length > REGIME_TELEMETRY_CAP) arr.splice(0, arr.length - REGIME_TELEMETRY_CAP);
@@ -1815,7 +1815,7 @@ function legacyStableCoinRegime(coin, s) {
   }
   return engine.regimeStability[coin].count >= 2 ? reading : "mixed";
 }
-// Fresh-v43.7 semantics: the value and the timestamp now describe the SAME
+// Fresh-v43.8 semantics: the value and the timestamp now describe the SAME
 // completed 15m candle. A gap breaks continuity rather than incrementing an old
 // count across unseen candles. Telemetry is recorded only after a successful row
 // append; a failed row is not falsely marked as observed.
@@ -2414,6 +2414,9 @@ async function runEngineStep() {
   // by this — existing positions keep being fully managed in memory
   // regardless of whether storage is currently working.
   if (!engine.halted && !persistenceDegraded && !runBuildMismatch() && !startupIntegrityBlocked) {
+    // v43.8 research provenance: one stable id for every candidate evaluated in this Phase-3 pass.
+    // Cross-strategy shadows from the same coin/side/cycle can now be deduplicated exactly.
+    const decisionCycleId = `${engineGeneration}:${(engine.apiHealth && engine.apiHealth.cyclesAttempted) || 0}:${Date.now()}`;
     await Promise.all(BOTS.map(async (bot) => {
       await Promise.all(coinList.map(async (coin) => {
         const acc = engine.bots[bot.key].coins[coin];
@@ -2426,6 +2429,26 @@ async function runEngineStep() {
         if (!isFreshState(s)) return;
         if (acc.position) return; // already open — Phase 1 handles existing positions
         if (!toggles[bot.key]) return; // toggle blocks NEW entries only
+
+        // v43.8 Donchian re-arm state is maintained on every fresh evaluation,
+        // even while there is NO current Donchian signal. This prevents missing
+        // the reset candle simply because price was inside the channel at that time.
+        if (bot.key === "donchian") {
+          if (!acc.donchianRearm || typeof acc.donchianRearm !== "object") acc.donchianRearm = { Long: null, Short: null };
+          const lastClosedPrice = (s.closes && s.closes.length >= 2) ? s.closes[s.closes.length - 2] : null;
+          if (Number.isFinite(lastClosedPrice)) {
+            const longLock = acc.donchianRearm.Long;
+            if (longLock && Number.isFinite(longLock.level) && lastClosedPrice <= longLock.level) {
+              acc.donchianRearm.Long = null;
+              logEngineEvent(`Donchian ${coin} Long: re-armed after a closed 15m candle returned through frozen breakout level $${fmt(longLock.level, decimalsFor(longLock.level))}.`);
+            }
+            const shortLock = acc.donchianRearm.Short;
+            if (shortLock && Number.isFinite(shortLock.level) && lastClosedPrice >= shortLock.level) {
+              acc.donchianRearm.Short = null;
+              logEngineEvent(`Donchian ${coin} Short: re-armed after a closed 15m candle returned through frozen breakout level $${fmt(shortLock.level, decimalsFor(shortLock.level))}.`);
+            }
+          }
+        }
 
         const sig = botSignal(bot.key, s.indicators);
         let side = null;
@@ -2447,7 +2470,9 @@ async function runEngineStep() {
           hypStop = side === "Long" ? s.buyZoneLow : s.sellZoneHigh;
         }
         const hypStopDistPct = hypStop ? Math.abs(hypEntry - hypStop) / hypEntry : null;
-        let hypTarget = (hypStopDistPct !== null) ? (side === "Long" ? hypEntry * (1 + hypStopDistPct * 2.5) : hypEntry * (1 - hypStopDistPct * 2.5)) : null;
+        const hypOriginalTarget = (hypStopDistPct !== null) ? (side === "Long" ? hypEntry * (1 + hypStopDistPct * 2.5) : hypEntry * (1 - hypStopDistPct * 2.5)) : null;
+        let hypTarget = hypOriginalTarget;
+        let hypCapApplied = false;
         // v40 fix: only cap to the structural level if that level is
         // genuinely still ahead of entry — if price had already moved
         // beyond it (a real, fairly common case), capping there would push
@@ -2459,7 +2484,7 @@ async function runEngineStep() {
             (side === "Long" ? structCeil > hypEntry : structCeil < hypEntry);
           if (structCeilAhead) {
             const beyond = side === "Long" ? hypTarget > structCeil : hypTarget < structCeil;
-            if (beyond) hypTarget = structCeil;
+            if (beyond) { hypTarget = structCeil; hypCapApplied = true; }
           }
         }
         // Final invariant: if the plan is directionally impossible (can
@@ -2512,9 +2537,28 @@ async function runEngineStep() {
           // v43.6: the paired veto is prepared only INSIDE addShadowTrade,
           // after shadow-capacity prechecks, then veto detail/totals + shadow
           // arrays + shadowCreatedCount commit in ONE LS_ENGINE write.
+          const researchMeta = { decisionCycleId, originalTarget: hypOriginalTarget, cappedTarget: hypTarget, capApplied: hypCapApplied };
           if (!addShadowTrade(bot.key, coin, side, hypEntry, hypStop, hypTarget, reason, vetoType, null, hypNotional, engine.feePct, undefined,
-              { vetoType, bot: bot.key, coin, reason })) {
+              { vetoType, bot: bot.key, coin, reason }, researchMeta)) {
             if (persistenceDegraded && engine) { const h = ensureApiHealth(); if (h) h.persistenceBlockedEntries = (h.persistenceBlockedEntries || 0) + 1; }
+            return;
+          }
+          // v43.8: addShadowTrade stores the original-target companion in the SAME
+          // authoritative transaction as the capped shadow, so this research adds no extra
+          // saveEngine/localStorage write to the trading path.
+        }
+
+        // v43.8 REAL STRATEGY CHANGE — Donchian fresh-breakout re-arm.
+        // After ANY Donchian close, that direction is disarmed against the exact breakout
+        // boundary frozen at the original entry. The continuously recalculated rolling band
+        // is deliberately NOT used for re-arm, because it can chase a strong move and make
+        // the requirement unstable. A fully CLOSED 15m candle must first return through the
+        // stored boundary before this side may trade again. This prevents same-breakout
+        // immediate re-entry while preserving a later genuinely fresh breakout opportunity.
+        if (bot.key === "donchian") {
+          const lock = acc.donchianRearm && acc.donchianRearm[side];
+          if (lock && Number.isFinite(lock.level)) {
+            blockCandidate("donchian_rearm", `${side} blocked: previous Donchian breakout is still disarmed; needs a fully closed 15m candle back through the frozen breakout level $${fmt(lock.level, decimalsFor(lock.level))} before a new breakout can qualify`);
             return;
           }
         }
@@ -2839,9 +2883,11 @@ async function runEngineStep() {
         // "strategy was right but got unlucky" apart from "signal itself was weak".
         const entryClosedRegime = coinRegimeClosedComponents(s);
         const entryStableRegime = (bot.key !== "rsi" && bot.key !== "boll") ? (stableRegimeByCoin[coin] || "mixed") : "exempt";
+        const scoreBreakdown = scoreDirectionBreakdown(s, side === "Long" ? "long" : "short");
         const entrySnapshot = {
           rsi: s.indicators.rsi.value,
           macdHist: s.indicators.macd.hist,
+          scoreBreakdown,
           regime: entryStableRegime,
           liveRegime: coinRegime(s),
           closedRawRegime: entryClosedRegime.final,
@@ -2862,7 +2908,7 @@ async function runEngineStep() {
           boll: "Earned permission (range state + exhaustion + structural proximity + volume + 2-check confirmation)",
           sma: "Passed stable regime + volume + momentum-strengthening + not-chasing + no severe contradiction",
           macd: "Passed stable regime + volume + momentum-strengthening + not-chasing + no severe contradiction",
-          donchian: "Passed stable regime + volume (structure-breakout thesis; momentum/chasing checks don't apply here)",
+          donchian: "Passed stable regime + volume + fresh-breakout re-arm (stored boundary reset confirmed; momentum/chasing checks don't apply here)",
           funding: "Passed stable regime + volume confirmation",
         };
         let reasonText = `${bot.label} signal — ${APPROVAL_REASONS[bot.key] || "passed all active checks"}`;
@@ -2913,6 +2959,19 @@ async function runEngineStep() {
           if (engine) { const h = ensureApiHealth(); if (h) h.persistenceBlockedEntries = (h.persistenceBlockedEntries || 0) + 1; }
           return;
         }
+        // v43.8 measurement-only market-wave context: current legacy correlation only
+        // notices same coin+direction across strategies. Count broader same-direction crypto
+        // exposure and recent entries across ALL strategies/coins without changing allocation.
+        let globalSameDirectionOpen = 0, recentSameDirection20m = 0;
+        const waveCutoff = Date.now() - 20 * 60000;
+        BOTS.forEach(bw => coinList.forEach(cw => {
+          const aw = engine.bots[bw.key] && engine.bots[bw.key].coins[cw];
+          if (aw && aw.position && aw.position.side === side) {
+            globalSameDirectionOpen++;
+            if ((aw.position.openedAt || 0) >= waveCutoff) recentSameDirection20m++;
+          }
+        }));
+
         acc.cash -= margin;
         if (bot.key === "rsi" || bot.key === "boll") {
           if (engine.reversalConfirm) engine.reversalConfirm[`${bot.key}_${coin}_${side}`] = { count: 0, lastCandleTime: null };
@@ -2928,6 +2987,9 @@ async function runEngineStep() {
           maxHoldMs: (engine.maxHoldHours || 24) * 3600000,
           riskReward: rr, reason: reasonText, openedAt: Date.now(),
           concurrentOpen, concurrentLong, concurrentShort, entrySnapshot, sameCoinSameSideOtherBots,
+          globalSameDirectionOpenAtEntry: globalSameDirectionOpen,
+          recentSameDirection20mAtEntry: recentSameDirection20m,
+          donchianBreakoutLevel: bot.key === "donchian" ? (side === "Long" ? s.indicators.donchian.upper : s.indicators.donchian.lower) : null,
           maePct: 0, mfePct: 0, // running worst/best excursion, updated on every exit-check scan
         };
     }));
@@ -3171,7 +3233,7 @@ function recordShadowSkip(h, vetoType, botKey, coin) {
   h.shadowSkippedByBot[botKey] = (h.shadowSkippedByBot[botKey] || 0) + 1;
   h.shadowSkippedByCoin[coin] = (h.shadowSkippedByCoin[coin] || 0) + 1;
 }
-function addShadowTrade(botKey, coin, side, entry, stop, target, reason, vetoType, actualPnl, notional, feePct, overrideMaxHoldMs, pairedVeto = null) {
+function addShadowTrade(botKey, coin, side, entry, stop, target, reason, vetoType, actualPnl, notional, feePct, overrideMaxHoldMs, pairedVeto = null, researchMeta = null) {
   if (entry == null || stop == null || target == null) return false; // incomplete plan (e.g. no ATR yet) — nothing to track
   if (!engine || persistenceDegraded) return false;
   const capacityHealth = ensureApiHealth();
@@ -3217,6 +3279,7 @@ function addShadowTrade(botKey, coin, side, entry, stop, target, reason, vetoTyp
   // the prior value BEFORE incrementing so every failed/preflight-aborted
   // candidate can roll back the counter exactly.
   const previousCreatedCount = engine.shadowCreatedCount || 0;
+  const previousResearchOnlyCreatedCount = engine.shadowResearchOnlyCreatedCount || 0;
   engine.shadowCreatedCount = previousCreatedCount + 1;
   const record = {
     id: Date.now() + Math.random(), t: Date.now(), bot: botKey, coin, side,
@@ -3229,7 +3292,30 @@ function addShadowTrade(botKey, coin, side, entry, stop, target, reason, vetoTyp
     actualPnl: actualPnl !== undefined ? actualPnl : null,
     notional: notional !== undefined ? notional : null,
     feePct: feePct !== undefined ? feePct : null,
+    decisionCycleId: researchMeta && researchMeta.decisionCycleId ? researchMeta.decisionCycleId : null,
+    originalTarget: researchMeta && Number.isFinite(researchMeta.originalTarget) ? researchMeta.originalTarget : null,
+    cappedTarget: researchMeta && Number.isFinite(researchMeta.cappedTarget) ? researchMeta.cappedTarget : null,
+    capApplied: !!(researchMeta && researchMeta.capApplied),
+    pairedResearchOnly: !!(researchMeta && researchMeta.pairedResearchOnly),
   };
+  // v43.8 measurement-only dual-target research. For target-cap vetoes, create a
+  // second shadow with the ORIGINAL uncapped 2.5R target. It is appended and
+  // persisted in the SAME transaction as the normal capped-target shadow, so it
+  // cannot add an extra storage write or create an orphaned half-pair.
+  let companionRecord = null;
+  if (vetoType === "target_capped" && researchMeta && researchMeta.capApplied && Number.isFinite(researchMeta.originalTarget) &&
+      Math.abs(researchMeta.originalTarget - target) > Math.max(1e-12, Math.abs(entry) * 1e-9)) {
+    companionRecord = {
+      ...record,
+      id: Date.now() + Math.random(),
+      target: researchMeta.originalTarget,
+      reason: `Original uncapped target counterfactual paired with target-cap veto: ${reason}`,
+      vetoType: "target_cap_original_counterfactual",
+      pairedResearchOnly: true,
+      counted: false,
+    };
+    engine.shadowResearchOnlyCreatedCount = previousResearchOnlyCreatedCount + 1;
+  }
   const isContinuation = vetoType === "early_exit_continuation" || vetoType === "regime_flip_continuation";
   const before = (isContinuation ? continuationShadows : shadowTrades).slice();
   if (isContinuation) {
@@ -3237,6 +3323,7 @@ function addShadowTrade(botKey, coin, side, entry, stop, target, reason, vetoTyp
     continuationShadows = trimShadowArray(continuationShadows, 1000);
   } else {
     shadowTrades.unshift(record);
+    if (companionRecord) shadowTrades.unshift(companionRecord);
     shadowTrades = trimShadowArray(shadowTrades, 2000);
   }
   // Make the candidate arrays authoritative IN MEMORY before estimating the
@@ -3250,7 +3337,7 @@ function addShadowTrade(botKey, coin, side, entry, stop, target, reason, vetoTyp
     vetoPrepared = recordVeto(pairedVeto.vetoType, pairedVeto.bot, pairedVeto.coin, pairedVeto.reason, true);
     if (!vetoPrepared) {
       if (isContinuation) continuationShadows = before; else shadowTrades = before;
-      engine.shadowCreatedCount = previousCreatedCount;
+      engine.shadowCreatedCount = previousCreatedCount; engine.shadowResearchOnlyCreatedCount = previousResearchOnlyCreatedCount;
       engine.shadowTrades = shadowTrades; engine.continuationShadows = continuationShadows;
       return false;
     }
@@ -3261,7 +3348,7 @@ function addShadowTrade(botKey, coin, side, entry, stop, target, reason, vetoTyp
   const softCeiling = Number.isFinite(engine.storageSoftCeilingBytes) ? engine.storageSoftCeilingBytes : RESEARCH_STORAGE_SOFT_CEILING_BYTES;
   if (projectedStorageBytesWithEngine() >= softCeiling) {
     if (isContinuation) continuationShadows = before; else shadowTrades = before;
-    engine.shadowCreatedCount = previousCreatedCount;
+    engine.shadowCreatedCount = previousCreatedCount; engine.shadowResearchOnlyCreatedCount = previousResearchOnlyCreatedCount;
     engine.shadowTrades = shadowTrades; engine.continuationShadows = continuationShadows;
     if (vetoPrepared) rollbackPreparedVeto(vetoPrepared);
     recordShadowSkip(capacityHealth, vetoType, botKey, coin);
@@ -3271,7 +3358,7 @@ function addShadowTrade(botKey, coin, side, entry, stop, target, reason, vetoTyp
   const persisted = saveShadowArraysAtomic(); // paired veto + shadow + counters in one LS_ENGINE write
   if (!persisted) {
     if (isContinuation) continuationShadows = before; else shadowTrades = before;
-    engine.shadowCreatedCount = previousCreatedCount;
+    engine.shadowCreatedCount = previousCreatedCount; engine.shadowResearchOnlyCreatedCount = previousResearchOnlyCreatedCount;
     engine.shadowTrades = shadowTrades; engine.continuationShadows = continuationShadows;
     if (vetoPrepared) rollbackPreparedVeto(vetoPrepared);
     return false;
@@ -3451,8 +3538,12 @@ function shadowSummary() {
   const byType = {};
   Object.keys(totals).forEach(vt => {
     const tt = totals[vt];
-    wins += tt.wins; losses += tt.losses; timeouts += tt.timeouts; ambiguousCount += tt.ambiguous;
-    resolvedCumulative += tt.n;
+    // v43.8: the original-target companion is research-only and must not inflate
+    // the headline "blocked candidates" win/loss rate as if another veto occurred.
+    if (vt !== "target_cap_original_counterfactual") {
+      wins += tt.wins; losses += tt.losses; timeouts += tt.timeouts; ambiguousCount += tt.ambiguous;
+      resolvedCumulative += tt.n;
+    }
     byType[vt] = { n: tt.n, wins: tt.wins, losses: tt.losses, timeouts: tt.timeouts, ambiguous: tt.ambiguous, hypNetSum: tt.hypNetSum, hypNetCount: tt.hypNetCount };
   });
   // P1-5 fix: total now comes from the cumulative created counter (see
@@ -3462,8 +3553,10 @@ function shadowSummary() {
   // report possible. Falls back to all.length only if the counter doesn't
   // exist yet (a save from before this fix, before any new shadow has
   // incremented it).
-  const total = Number.isFinite(engine.shadowCreatedCount) ? engine.shadowCreatedCount : all.length;
-  return { total, resolved: resolvedCumulative, wins, losses, timeouts, ambiguousCount, pending, byType };
+  const researchOnlyCreated = engine.shadowResearchOnlyCreatedCount || 0;
+  const total = Number.isFinite(engine.shadowCreatedCount) ? Math.max(0, engine.shadowCreatedCount - researchOnlyCreated) : all.filter(st => !st.pairedResearchOnly).length;
+  const mainPending = all.filter(st => st.status === "pending" && !st.pairedResearchOnly).length;
+  return { total, resolved: resolvedCumulative, wins, losses, timeouts, ambiguousCount, pending: mainPending, byType };
 }
 
 function closeFullPosition(acc, p, exitPrice, exitReason, exitTime, engine, exitPriceQuality = "event_level_or_live") {
@@ -3564,6 +3657,9 @@ function closeFullPosition(acc, p, exitPrice, exitReason, exitTime, engine, exit
     openedAt: p.openedAt, durationHrs, maePct: finalMae, mfePct: finalMfe,
     concurrentOpen: p.concurrentOpen, concurrentLong: p.concurrentLong, concurrentShort: p.concurrentShort,
     sameCoinSameSideOtherBots: p.sameCoinSameSideOtherBots || [],
+    globalSameDirectionOpenAtEntry: p.globalSameDirectionOpenAtEntry || 0,
+    recentSameDirection20mAtEntry: p.recentSameDirection20mAtEntry || 0,
+    donchianBreakoutLevel: p.donchianBreakoutLevel ?? null,
     entrySnapshot: p.entrySnapshot,
   };
   // v41 fix: acc.trades was still written on every close, duplicating every
@@ -3624,6 +3720,13 @@ function closeFullPosition(acc, p, exitPrice, exitReason, exitTime, engine, exit
   // "Loss" in lastClose, and the re-entry evidence-changed check treated an
   // uncertain outcome as certain. Now reuses the same classification.
   acc.lastClose[p.side] = { reason: exitReason, time: exitTime || Date.now(), price: exitPrice, result, snapshot: exitSnapshot };
+  // v43.8: every Donchian close consumes that breakout. Re-arm uses the exact
+  // breakout level frozen at entry and requires a later CLOSED candle to return
+  // through it before the same direction can qualify again.
+  if (p.bot === "donchian" && Number.isFinite(p.donchianBreakoutLevel)) {
+    if (!acc.donchianRearm || typeof acc.donchianRearm !== "object") acc.donchianRearm = { Long: null, Short: null };
+    acc.donchianRearm[p.side] = { level: p.donchianBreakoutLevel, disarmedAt: exitTime || Date.now(), exitReason };
+  }
   acc.position = null;
 
   // v43.4 CRITICAL: only now may continuation research persist the whole engine.
@@ -3864,6 +3967,8 @@ function renderEngine() {
     late_entry: "Late entry (chasing an already-extended move)",
     weak_momentum: "Weak momentum (sign supports trade but strength is fading)",
     target_capped: "Target capped or rejected at real support/resistance",
+    target_cap_original_counterfactual: "Target-cap original uncapped-target counterfactual",
+    donchian_rearm: "Donchian re-arm blocked (same breakout not reset)",
     reversal_unconfirmed: "RSI/Bollinger reversal not yet earned",
     cooldown_active: "Blocked by cooldown timer (recent loss on this coin+direction)",
     regime_gate: "Regime gate (wrong direction or not yet stable)",
@@ -4094,7 +4199,7 @@ function generateReport() {
     out += `1-minute API unavailability: ${h.oneMinApiFailures || 0} raw failed/unavailable fetch window(s) (${h.bg_oneMinApiFailures || 0} on background/removed symbols)\n`;
     out += `1-minute outcome impact: ${h.realResolverUnresolved || 0} real-position resolution(s) degraded | ${h.shadowResolverUnresolved || 0} shadow-only resolution(s) degraded — purpose, not coin membership, drives the verdicts below\n`;
     out += `Storage errors: ${h.storageErrors}${h.persistenceDegraded ? ` | ${storageProblemLabel()} — time in degraded state: ${(degradedMs/60000).toFixed(1)} min (new entries were paused during this period)` : ""}${h.persistenceBlockedEntries ? ` | ${h.persistenceBlockedEntries} entry attempt(s) blocked by degraded storage (infrastructure, not a trading filter — excluded from veto/shadow research)` : ""}\n`;
-    out += `Regime telemetry: ${h.regimeTelemetryRecords || 0} closed-candle record(s) | ${h.regimeExitTelemetryRecords || 0} exit/transition event(s) | ${h.regimeTelemetryErrors || 0} error(s) | ${h.regimeTelemetryRepairs || 0} structure repair(s)\n`;
+    out += `Regime telemetry: ${h.regimeTelemetryRecords || 0} closed-candle record(s) | ${h.regimeExitTelemetryRecords || 0} exit/transition event(s) | ${h.regimeTelemetryErrors || 0} error(s) | ${h.regimeTelemetryCoinInitializations || 0} coin initialization(s) | ${h.regimeTelemetryRepairs || 0} genuine structure repair(s)\n`;
     out += `Regime diagnostics: live-vs-closed disagreement ${h.regimeLiveClosedDisagreements || 0} | continuity-gap resets ${h.regimeContinuityGapResets || 0} | diagnostic reconstruction mismatches ${h.regimeDiagnosticMismatchCount || 0} | legacy same-candle 2-refresh exit confirmations ${h.legacySameCandleExitConfirmations || 0}\n`;
     // v41.2 fix (A2): a cycle that never even STARTED (browser suspension,
     // the Mac sleeping) previously left zero trace — cyclesAttempted only
@@ -4167,7 +4272,7 @@ function generateReport() {
     const confPerDay = coverageH > 0 ? confirmedChanges * 24 / coverageH : 0;
     out += `${c}: ${rows.length} closed candles | coverage ${coverageH.toFixed(1)}h | raw changes ${rawChanges} (${rawPerDay.toFixed(1)}/day) | confirmed changes ${confirmedChanges} (${confPerDay.toFixed(1)}/day) | median confirmed spell ${medianEp == null ? "n/a" : medianEp + " candle(s)"} | gap rows ${gaps} | live/closed disagreements ${disagreements}\n`;
   });
-  if (!rtCoins.length) out += `No v43.7 closed-candle regime telemetry recorded yet.\n`;
+  if (!rtCoins.length) out += `No v43.8 closed-candle regime telemetry recorded yet.\n`;
   const rx = Array.isArray(engine.regimeExitTelemetry) ? engine.regimeExitTelemetry : [];
   const legacyWouldClose = rx.filter(r => Array.isArray(r) && r[12] === 1).length;
   const actualStableExits = rx.filter(r => Array.isArray(r) && r[12] === 2).length;
@@ -4178,7 +4283,7 @@ function generateReport() {
   out += `Regime telemetry integrity: ${teleClean ? "CLEAN" : "INCOMPLETE / CHECK ERRORS"} | errors ${hReg ? (hReg.regimeTelemetryErrors || 0) : 0} | reconstruction mismatches ${hReg ? (hReg.regimeDiagnosticMismatchCount || 0) : 0}\n`;
   try { out += `Current browser localStorage estimate: ${(estimateLocalStorageBytes()/1024/1024).toFixed(2)} MB | research soft ceiling ${(RESEARCH_STORAGE_SOFT_CEILING_BYTES/1024/1024).toFixed(2)} MB\n`; } catch (_) {}
 
-  out += `\n=== TRADE / REGIME LINKAGE (v43.7 telemetry window only) ===\n`;
+  out += `\n=== TRADE / REGIME LINKAGE (v43.8 telemetry window only) ===\n`;
   const linkTrades = (engine.allTradesEver || []).filter(t => Number.isFinite(t.openedAt));
   let linkedN = 0;
   linkTrades.forEach(t => {
@@ -4191,7 +4296,7 @@ function generateReport() {
     const override = Number.isFinite(r[7]) && Math.abs(r[7]) >= 150 ? "yes" : "no";
     out += `${t.botLabel || t.bot} ${t.coin} ${t.side} | score ${t.entryScore == null ? "n/a" : t.entryScore} | entry +${entrySec}s after 15m boundary | confirmed-regime age ${ageCandles} candle(s) | closed ROC ${r[7] == null ? "n/a" : (r[7]/100).toFixed(2)+"%"} | ROC override ${override} | MFE ${t.mfePct == null ? "n/a" : t.mfePct.toFixed(2)+"%"} | MAE ${t.maePct == null ? "n/a" : t.maePct.toFixed(2)+"%"} | ${t.result || "open"}\n`;
   });
-  if (!linkedN) out += `No completed trade currently overlaps the v43.7 telemetry window.\n`;
+  if (!linkedN) out += `No completed trade currently overlaps the v43.8 telemetry window.\n`;
   out += `\nCompact closed-candle tuple schema: [closedOpenMs, closedRaw, confirmed, streak, skipped, ATRbp, closedSlow, closedROCbp, liveRaw, liveSlow, liveROCbp]; regime codes -1=bear, 0=mixed, 1=bull.\n`;
   out += `Compact exit tuple schema: [atMs, coin, botIndex, side, positionOpenedAt, liveRaw, closedRaw, stable, legacyStreak, formingCandleOpenMs, liveROCbp, liveSlow, event]; event 0=state transition, 1=legacy 2-refresh would-close, 2=actual stable exit.\n`;
   // Include bounded compact raw arrays so later forensic analysis can be done
@@ -4209,6 +4314,8 @@ function generateReport() {
     late_entry: "Late entry (chasing an already-extended move)",
     weak_momentum: "Weak momentum (sign supports trade but strength is fading)",
     target_capped: "Target capped or rejected at real support/resistance",
+    target_cap_original_counterfactual: "Target-cap original uncapped-target counterfactual",
+    donchian_rearm: "Donchian re-arm blocked (same breakout not reset)",
     reversal_unconfirmed: "RSI/Bollinger reversal not yet earned (range/exhaustion/structure/volume/confirmation)",
     cooldown_active: "Blocked by cooldown timer (recent loss on this coin+direction)",
     regime_gate: "Regime gate (wrong direction or not yet stable)",
@@ -4415,6 +4522,38 @@ function generateReport() {
   const unscored = allForScore.filter(t => t.entryScore == null).length;
   if (unscored) out += `(${unscored} older trades have no score recorded)\n`;
 
+  // v43.8 event-level target-cap research. Raw shadow rows are preserved, but
+  // cross-strategy duplicates from the same decision cycle are summarized as one
+  // market event. This is reporting only; it does not merge or suppress trading logic.
+  const capRows = shadowTrades.filter(st => st.vetoType === "target_capped" && st.t >= (engine.startedAt || 0));
+  const capOrigRows = shadowTrades.filter(st => st.vetoType === "target_cap_original_counterfactual" && st.t >= (engine.startedAt || 0));
+  const capClusters = new Map();
+  capRows.forEach(st => {
+    const key = `${st.decisionCycleId || "legacy"}|${st.coin}|${st.side}`;
+    if (!capClusters.has(key)) capClusters.set(key, []);
+    capClusters.get(key).push(st);
+  });
+  const capDuplicateParticipants = [...capClusters.values()].filter(g => g.length > 1).reduce((a,g)=>a+g.length,0);
+  const capRedundant = [...capClusters.values()].reduce((a,g)=>a+Math.max(0,g.length-1),0);
+  const capSameStrategyRepeats = (() => {
+    const groups = new Map();
+    capRows.slice().sort((a,b)=>a.t-b.t).forEach(st => {
+      const key = `${st.bot}|${st.coin}|${st.side}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(st);
+    });
+    let repeats = 0;
+    groups.forEach(rows => { for (let i=1;i<rows.length;i++) if (rows[i].t - rows[i-1].t <= 25*60000) repeats++; });
+    return repeats;
+  })();
+  out += `\n=== V43.8 TARGET-CAP EVENT-LEVEL RESEARCH ===\n`;
+  out += `Raw capped-target shadow rows retained: ${capRows.length} | unique decision-cycle coin+side event(s): ${capClusters.size} | rows participating in cross-strategy duplicate clusters: ${capDuplicateParticipants} | redundant rows after exact cycle-level dedup: ${capRedundant} | same-strategy repeat episode(s) within 25m: ${capSameStrategyRepeats}\n`;
+  out += `Original-uncapped companion shadows retained: ${capOrigRows.length}. These are the counterfactual needed to distinguish 'capped target would hit' from 'original 2.5R target would hit'.\n`;
+  if (capRows.length) {
+    out += `Full retained target-cap rows (not the throttled decision-detail view):\n`;
+    capRows.forEach(st => { out += `  ${new Date(st.t).toLocaleString()} | cycle ${st.decisionCycleId || "legacy"} | ${st.bot} ${st.coin} ${st.side} | entry ${st.entry} stop ${st.stop} capped ${st.target} original ${st.originalTarget == null ? "n/a" : st.originalTarget} | ${st.status}${st.resolution ? `/${st.resolution}` : ""}\n`; });
+  }
+
   out += `\n=== BY COIN, BY STRATEGY ===\n`;
   // v33 fix: was scoped to coinList only, silently dropping any removed
   // coin's entire history from this section. Now covers every coin that
@@ -4456,9 +4595,12 @@ function generateReport() {
     const mfeStr = (t.mfePct !== undefined) ? fmt(t.mfePct, 2) + "%" : "n/a";
     const concStr = (t.concurrentOpen !== undefined) ? `${t.concurrentOpen} open (${t.concurrentLong}L/${t.concurrentShort}S)` : "n/a";
     const snap = t.entrySnapshot || {};
-    const snapStr = `RSI ${snap.rsi != null ? snap.rsi.toFixed(1) : "n/a"}, MACD hist ${snap.macdHist != null ? snap.macdHist.toFixed(3) : "n/a"}, stable regime ${snap.regime || "n/a"}, live regime ${snap.liveRegime || "n/a"}, closed raw ${snap.closedRawRegime || "n/a"}, regime age ${snap.regimeAgeCandles != null ? snap.regimeAgeCandles+" candles" : "n/a"}, boundary +${snap.entryBoundarySeconds != null ? snap.entryBoundarySeconds+"s" : "n/a"}, closed ROC ${snap.closedRocPct != null ? snap.closedRocPct.toFixed(2)+"%" : "n/a"}, ATR ${snap.atrPct != null ? (snap.atrPct*100).toFixed(2)+"%" : "n/a"}, vol ${snap.volRatio != null ? snap.volRatio.toFixed(2)+"x" : "n/a"}`;
+    const sb = snap.scoreBreakdown || null;
+    const sub = sb && sb.subchecks ? sb.subchecks : null;
+    const scoreSubStr = sub ? ` | Score subchecks: SMA10/30 ${sub.sma10_30Aligned?"Y":"N"}, px>SMA96 ${sub.priceVsSma96Aligned?"Y":"N"}, px>SMA192 ${sub.priceVsSma192Aligned?"Y":"N"}, MACD dir ${sub.macdDirectionAligned?"Y":"N"}, RSI healthy ${sub.rsiHealthyBand?"Y":"N"}, RSI extreme ${sub.rsiExtremeCountertrend?"Y":"N"}` : "";
+    const snapStr = `RSI ${snap.rsi != null ? snap.rsi.toFixed(1) : "n/a"}, MACD hist ${snap.macdHist != null ? snap.macdHist.toFixed(3) : "n/a"}, stable regime ${snap.regime || "n/a"}, live regime ${snap.liveRegime || "n/a"}, closed raw ${snap.closedRawRegime || "n/a"}, regime age ${snap.regimeAgeCandles != null ? snap.regimeAgeCandles+" candles" : "n/a"}, boundary +${snap.entryBoundarySeconds != null ? snap.entryBoundarySeconds+"s" : "n/a"}, closed ROC ${snap.closedRocPct != null ? snap.closedRocPct.toFixed(2)+"%" : "n/a"}, ATR ${snap.atrPct != null ? (snap.atrPct*100).toFixed(2)+"%" : "n/a"}, vol ${snap.volRatio != null ? snap.volRatio.toFixed(2)+"x" : "n/a"}${scoreSubStr}`;
     const clusterStr = (t.sameCoinSameSideOtherBots && t.sameCoinSameSideOtherBots.length) ? `Also open on this coin+direction: ${t.sameCoinSameSideOtherBots.join(", ")}` : "No other strategy on this coin+direction";
-    out += `[${new Date(t.closedAt).toLocaleString()}] ${t.botLabel} | ${t.coin} ${t.side} | Entered: ${entryTimeStr} | Duration: ${durStr} | Reason for entry: ${t.reason || "n/a"} | Score at entry: ${t.entryScore == null ? "n/a" : t.entryScore} | Entry $${fmt(t.entry, pd)} Stop $${fmt(t.stop, pd)} Target $${fmt(t.target, pd)} | Lev ${t.leverage}x | R:R ${fmt(t.riskReward, 1)} | MAE ${maeStr} MFE ${mfeStr} | Concurrent: ${concStr} | Cluster: ${clusterStr} | Entry snapshot: ${snapStr} | Exit $${fmt(t.exitPrice, pd)} (${t.exitReason}) | Gross $${fmt(t.grossPnl)} Fees $${fmt(t.fees)} Net $${fmt(t.netPnl)} | Balance after $${fmt(t.balanceAfter)} | ${t.result}\n`;
+    out += `[${new Date(t.closedAt).toLocaleString()}] ${t.botLabel} | ${t.coin} ${t.side} | Entered: ${entryTimeStr} | Duration: ${durStr} | Reason for entry: ${t.reason || "n/a"} | Score at entry: ${t.entryScore == null ? "n/a" : t.entryScore} | Entry $${fmt(t.entry, pd)} Stop $${fmt(t.stop, pd)} Target $${fmt(t.target, pd)} | Lev ${t.leverage}x | R:R ${fmt(t.riskReward, 1)} | MAE ${maeStr} MFE ${mfeStr} | Concurrent: ${concStr} | Cluster: ${clusterStr} | Market-wave: ${t.globalSameDirectionOpenAtEntry || 0} same-direction already open, ${t.recentSameDirection20mAtEntry || 0} opened in prior 20m | Entry snapshot: ${snapStr} | Exit $${fmt(t.exitPrice, pd)} (${t.exitReason}) | Gross $${fmt(t.grossPnl)} Fees $${fmt(t.fees)} Net $${fmt(t.netPnl)} | Balance after $${fmt(t.balanceAfter)} | ${t.result}\n`;
   });
 
   return out;
@@ -4785,7 +4927,7 @@ async function analyzeCoin(ticker, scope, opts) {
       rsi: { signal: rsiSignal, reading: rsiVal !== null ? rsiVal.toFixed(1) : "—", value: rsiVal },
       macd: { signal: macdSignal, reading: macdRes.hist !== null ? macdRes.hist.toFixed(2) : "—", hist: macdRes.hist, histPrev: macdRes.histPrev },
       boll: { signal: bollSignal, reading: boll ? "$" + fmt(price, decimalsFor(price)) : "—" },
-      donchian: { signal: donchSignal, reading: donch ? (donchSignal === "bull" ? "Broke 20-high" : donchSignal === "bear" ? "Broke 20-low" : "Inside range") : "—" },
+      donchian: { signal: donchSignal, reading: donch ? (donchSignal === "bull" ? "Broke 20-high" : donchSignal === "bear" ? "Broke 20-low" : "Inside range") : "—", upper: donch ? donch.upper : null, lower: donch ? donch.lower : null },
       // Funding + Momentum: funding rate is the only signal here NOT derived from
       // price — it's real positioning data. Crowded longs (very positive funding)
       // with fading momentum is a contrarian short; the reverse is a long.
@@ -5015,39 +5157,40 @@ function autoTrackFromScan(scan) {
 // Claude directly) since no free API can reliably judge what a headline means.
 const SIGNAL_THRESHOLD = 65; // minimum score to generate a full trade plan
 
-function scoreDirection(s, dir) {
-  // dir = "long" or "short". Returns 0-100 score for that direction.
-  if (!s || s.price === null || !s.indicators) return 0;
+function scoreDirectionBreakdown(s, dir) {
+  // v43.8 research-only decomposition. The trading score itself is unchanged;
+  // this exposes the individual correlated sub-checks so we can test whether
+  // Trend/Momentum double-count the same underlying move rather than merely
+  // logging two aggregate buckets.
+  if (!s || s.price === null || !s.indicators) return { total: 0, subchecks: {} };
   let score = 0;
   const bullish = dir === "long";
+  const subchecks = {
+    sma10_30Aligned: s.indicators.sma.signal === (bullish ? "bull" : "bear"),
+    priceVsSma96Aligned: s.sma96 !== null && (bullish ? s.price > s.sma96 : s.price < s.sma96),
+    priceVsSma192Aligned: s.sma192 !== null && (bullish ? s.price > s.sma192 : s.price < s.sma192),
+    macdDirectionAligned: s.indicators.macd.hist !== null && (bullish ? s.indicators.macd.hist > 0 : s.indicators.macd.hist < 0),
+    rsiHealthyBand: false,
+    rsiExtremeCountertrend: false,
+  };
 
-  // Trend (40%) — short-term crossover + two longer lookback windows as a
-  // multi-timeframe proxy, all from the same price series.
   let trendPts = 0;
-  if (s.indicators.sma.signal === (bullish ? "bull" : "bear")) trendPts += 14;
-  if (s.sma96 !== null && (bullish ? s.price > s.sma96 : s.price < s.sma96)) trendPts += 13;
-  if (s.sma192 !== null && (bullish ? s.price > s.sma192 : s.price < s.sma192)) trendPts += 13;
+  if (subchecks.sma10_30Aligned) trendPts += 14;
+  if (subchecks.priceVsSma96Aligned) trendPts += 13;
+  if (subchecks.priceVsSma192Aligned) trendPts += 13;
   score += trendPts;
 
-  // Momentum (30%) — MACD direction + RSI positioning (avoid chasing extremes)
   let momPts = 0;
-  if (s.indicators.macd.hist !== null && (bullish ? s.indicators.macd.hist > 0 : s.indicators.macd.hist < 0)) momPts += 15;
+  if (subchecks.macdDirectionAligned) momPts += 15;
   const rsi = s.indicators.rsi.value;
   if (rsi !== null) {
-    if (bullish && rsi > 35 && rsi < 68) momPts += 15;      // healthy, not overbought
-    if (!bullish && rsi < 65 && rsi > 32) momPts += 15;     // healthy, not oversold
-    if (bullish && rsi < 30) momPts += 8;                    // oversold bounce potential
-    if (!bullish && rsi > 70) momPts += 8;                   // overbought pullback potential
+    subchecks.rsiHealthyBand = bullish ? (rsi > 35 && rsi < 68) : (rsi < 65 && rsi > 32);
+    subchecks.rsiExtremeCountertrend = bullish ? rsi < 30 : rsi > 70;
+    if (subchecks.rsiHealthyBand) momPts += 15;
+    if (subchecks.rsiExtremeCountertrend) momPts += 8;
   }
   score += Math.min(momPts, 30);
 
-  // Structure (15%) — room to run: longs want to be nearer support, shorts nearer resistance
-  // v33 fix: positionInRange isn't clamped at its source (a genuine breakout
-  // above resistance or breakdown below support can push it negative or
-  // above 1) — used raw here, that inverted the score, PENALIZING the exact
-  // breakout/breakdown setups this component should reward. Clamped for
-  // scoring only; other consumers (late-entry, reversal permission) use
-  // simple threshold comparisons that already behave sensibly unclamped.
   let structPts = 0;
   if (s.positionInRange !== undefined) {
     const clampedRange = Math.max(0, Math.min(1, s.positionInRange));
@@ -5055,38 +5198,27 @@ function scoreDirection(s, dir) {
   }
   score += structPts;
 
-  // Tradeability (15%) — is there actually enough money in this setup?
-  // Added because the score previously rated pegged/tight-range coins highly
-  // (USD1 scored 80/100 with a 0.0% stop distance). A beautiful chart with no
-  // room to move is not a trade.
   let tradePts = 0;
   if (s.atrPct) {
-    // TP3 sits at 2.5x a 2xATR stop, so expected move = 5 x ATR
     const expectedMovePct = s.atrPct * 5 * 100;
     if (expectedMovePct >= 6) tradePts = 15;
     else if (expectedMovePct >= 4) tradePts = 12;
     else if (expectedMovePct >= 2.5) tradePts = 8;
     else if (expectedMovePct >= 1.5) tradePts = 4;
-    else tradePts = 0; // too tight to be worth trading
   }
   score += tradePts;
 
-  // Funding rate (10%) — contrarian signal on crowding, where available
-  let fundPts = 5; // neutral default if no futures data
+  let fundPts = 5;
   if (Number.isFinite(s.fundingRate)) {
     if (bullish) fundPts = s.fundingRate < 0 ? 10 : s.fundingRate > 0.05 ? 0 : 6;
     else fundPts = s.fundingRate > 0 ? 10 : s.fundingRate < -0.05 ? 0 : 6;
   }
   score += fundPts;
-
-  // v33 fix: the five components above were designed as 40+30+15+15+10 —
-  // that's 110, not 100 (an authoring error in the original percentage
-  // split). Simply capping at 100 silently compressed different setups
-  // (anything from 100-110 pre-cap) into the same ceiling, losing the
-  // ability to distinguish a good setup from an exceptional one. Rescaled
-  // to a genuine 100-point scale instead, preserving the same relative
-  // weighting between components.
-  return Math.round(Math.min(score / 1.1, 100));
+  const total = Math.round(Math.min(score / 1.1, 100));
+  return { total, trendPts, momentumPts: Math.min(momPts, 30), structurePts: structPts, tradeabilityPts: tradePts, fundingPts: fundPts, subchecks };
+}
+function scoreDirection(s, dir) {
+  return scoreDirectionBreakdown(s, dir).total;
 }
 
 function buildScan() {
