@@ -152,7 +152,7 @@
     <div>
       <h1>Trading Monitor</h1>
       <div class="sub">Each strategy trades independently with its own $ per coin · live prices · no real money</div>
-      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v43.9 · 2026-09-13 (ChatGPT integrity fixes + complete research instrumentation)</div>
+      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v43.10 · 2026-09-14 (storage reliability + Resolve-Fold-Compact + diagnostic instrumentation)</div>
     </div>
     <button id="refreshBtn">Refresh</button>
   </div>
@@ -338,7 +338,7 @@
   <div class="grid" id="cardGrid"></div>
 
   <div class="footnote" style="text-align:center;">
-    <span style="font-family:monospace; color:#4a5568; font-size:11px;">Build v43.9</span> · Full version history moved to the Excel research register — this footer no longer duplicates it.<br/>
+    <span style="font-family:monospace; color:#4a5568; font-size:11px;">Build v43.10</span> · Full version history moved to the Excel research register — this footer no longer duplicates it.<br/>
     Assumption recorded: £/$ treated as 1:1 since prices come from USDT pairs — no live FX conversion applied. Fees assumed at 0.1% per side, no funding cost modeled. Each strategy's pot per coin is fully isolated — a loss in one never affects another. Data saved only in this browser. Price/execution simulation uses Binance SPOT candles throughout; the funding-rate signal (used by Funding+Momentum and the scanner) is pulled from the separate PERPETUAL FUTURES market as a sentiment proxy only — no funding payments are simulated or applied to any P&L. Spot and futures prices can differ, so this is a proxy signal, not a futures execution model.
   </div>
 </div>
@@ -348,10 +348,10 @@
 // can actually work on them). More coins = more signals = a usable sample size
 // sooner. The exposure cap keeps total risk in check, so a wider list gives the
 // system more to choose from rather than more to pile into.
-const BUILD_TAG = "v43.9 · 2026-09-13 (ChatGPT integrity fixes + complete research instrumentation)";
-const BUILD_PARENT_SHA256 = "cb195a985325aff00146d95427d5a2e136735eb09887bf3733f5309d64cfa955";
-const BUILD_PARENT_MD5 = "22e66f77de462df443ba676e8245cee0";
-const V439_INSTRUMENTATION_VERSION = "v43.9-r1";
+const BUILD_TAG = "v43.10 · 2026-09-14 (storage reliability + Resolve-Fold-Compact + diagnostic instrumentation)";
+const BUILD_PARENT_SHA256 = "a2fdc9815a578c6fff6b79c9b7cdc31409c44383e92452b385a999d2ef59a7fe";
+const BUILD_PARENT_MD5 = "aec9d15767fb287328535bc8db414a19";
+const V439_INSTRUMENTATION_VERSION = "v43.10-r1"; // variable name kept for minimal diff churn; value bumped so a genuine v43.10 run reports its own version, and an older v43.9 save loaded into this file correctly shows MISMATCH / OLD RUN instead of a false INSTALLED
 
 const DEFAULT_COINS = [
   "BTC", "ETH", "SOL", "BNB", "ADA", "XRP", "DOGE", "AVAX",
@@ -496,6 +496,26 @@ function finalizeShadowResolution(st, engine) {
       if (st.hypotheticalPnl !== undefined && st.resolution !== "ambiguous") {
         tt.hypNetSum += st.hypotheticalPnl;
         tt.hypNetCount++;
+      }
+      // v43.10: same exact-once fold, additionally broken down by strategy —
+      // required so compacted shadows remain analyzable by strategy without
+      // needing the (now-compacted) raw records. Deliberately NOT broken
+      // down by score bucket: shadows are blocked before score is always
+      // computed (many veto types fire earlier in the pipeline than score
+      // calculation), so no shadow record ever carries a score value to
+      // bucket by — this differs from real trades, which always have one.
+      if (!engine.shadowTotalsByStrategy) engine.shadowTotalsByStrategy = {};
+      const stratKey = `${st.vetoType}|${st.bot}`;
+      if (!engine.shadowTotalsByStrategy[stratKey]) engine.shadowTotalsByStrategy[stratKey] = { vetoType: st.vetoType, bot: st.bot, n: 0, wins: 0, losses: 0, timeouts: 0, ambiguous: 0, hypNetSum: 0, hypNetCount: 0 };
+      const ts = engine.shadowTotalsByStrategy[stratKey];
+      ts.n++;
+      if (st.resolution === "would_win") ts.wins++;
+      else if (st.resolution === "would_lose") ts.losses++;
+      else if (st.resolution === "ambiguous") ts.ambiguous++;
+      else ts.timeouts++;
+      if (st.hypotheticalPnl !== undefined && st.resolution !== "ambiguous") {
+        ts.hypNetSum += st.hypotheticalPnl;
+        ts.hypNetCount++;
       }
     }
   }
@@ -1775,6 +1795,24 @@ function ensureCoinInEngine(coin) {
     }
   });
 }
+// v43.10 addition #16: Bollinger gate diagnostic instrumentation. Counters
+// only, no verbose logs — does not alter any Bollinger condition, threshold,
+// or entry eligibility. Mapping to the pipeline's actual checkpoints (RSI/
+// Bollinger are exempt from regime_gate, so "regime-condition" here means
+// the severe_contradiction check, the closest regime-based gate that DOES
+// apply to them; "confirmation" — the separate needs-2-consecutive-closed-
+// candles check — is folded into reversal-condition since both share the
+// same reversal_unconfirmed veto type):
+function bumpBollFunnel(stage, side, passed) {
+  if (!engine) return;
+  if (!engine.bollingerFunnel) engine.bollingerFunnel = {};
+  const f = engine.bollingerFunnel;
+  if (!f[stage]) f[stage] = { pass: 0, fail: 0, bySide: { Long: { pass: 0, fail: 0 }, Short: { pass: 0, fail: 0 } } };
+  const key = passed ? "pass" : "fail";
+  f[stage][key]++;
+  if (side === "Long" || side === "Short") f[stage].bySide[side][key]++;
+}
+
 function botSignal(botKey, ind) {
   const d = ind[botKey];
   if (!d) return "neutral";
@@ -1941,12 +1979,27 @@ async function runEngineStep() {
   // When this page is opened over an older-build run, new entries are blocked
   // by build provenance and the legacy stability semantics are retained for the
   // old run rather than silently changing it mid-benchmark.
-  // v43.9 compatibility: v43.7 and v43.8 already used the corrected closed-candle
-  // regime entry/exit semantics. If this page is opened over one of those runs,
-  // build mismatch still blocks NEW entries, but existing positions must keep the
-  // same closed-candle exit semantics they started with rather than reverting to
-  // the pre-v43.7 two-refresh live exit by accident.
-  const regimeIntegrityModeActive = !!(engine.startBuildTag && /^v43\.(7|8|9)\b/.test(engine.startBuildTag));
+  // v43.7+ compatibility: v43.7 was the first build with corrected closed-candle
+  // regime entry/exit semantics. If this page is opened over a run started on
+  // v43.7 or later, build mismatch still blocks NEW entries, but existing
+  // positions must keep the same closed-candle exit semantics they started with
+  // rather than reverting to the pre-v43.7 two-refresh live exit by accident.
+  // v43.10 fix: the previous check was a hardcoded /^v43\.(7|8|9)\b/ list, which
+  // silently evaluated to FALSE for "v43.10" (regex alternation has no branch
+  // starting with "1", so v43.10 matched none of 7/8/9) — this would have
+  // reverted v43.10's OWN native run to legacy pre-v43.7 regime semantics on
+  // day one, caught only by hand-testing this exact string before shipping.
+  // Replaced with an actual numeric minor-version comparison so this class of
+  // bug cannot recur at v43.11, v43.12, etc.
+  function startBuildAtLeast(tag, minMajor, minMinor) {
+    if (!tag) return false;
+    const m = /^v(\d+)\.(\d+)/.exec(tag);
+    if (!m) return false;
+    const major = parseInt(m[1], 10), minor = parseInt(m[2], 10);
+    if (major !== minMajor) return major > minMajor;
+    return minor >= minMinor;
+  }
+  const regimeIntegrityModeActive = startBuildAtLeast(engine.startBuildTag, 43, 7);
   if (!runBuildMismatch() && engine.startBuildTag === BUILD_TAG) ensureRegimeResearchStructures();
   const stableRegimeByCoin = {};
   coinList.forEach(c2 => {
@@ -2505,6 +2558,8 @@ async function runEngineStep() {
         if (sig === "bull") side = "Long";
         else if (sig === "bear" && engine.allowShorts) side = "Short";
         if (!side) return;
+        // v43.10 addition #16: raw signal opportunity counter (diagnostic only)
+        if (bot.key === "boll") bumpBollFunnel("rawSignalOpportunity", side, true);
 
         // v30 shadow tracking: compute the hypothetical trade plan UP FRONT,
         // before any veto check runs, using the exact same formulas a real
@@ -2701,6 +2756,7 @@ async function runEngineStep() {
         // v43.7 runs. A gap also resets the confirmation count instead of
         // incrementing across unseen candles.
         if (bot.key === "rsi" || bot.key === "boll") {
+          if (bot.key === "boll") bumpBollFunnel("reachedClosedMeanReversionEval", side, true); // v43.10 #16
           const closedPermissionState = regimeIntegrityModeActive ? closedMeanReversionState(s) : s;
           const permission = checkMeanReversionPermission(closedPermissionState || s, side);
           const confirmKey = `${bot.key}_${coin}_${side}`;
@@ -2708,6 +2764,7 @@ async function runEngineStep() {
           const lastClosedCandleTime = (s.times && s.times.length >= 2) ? s.times[s.times.length - 2] : null;
           if (!permission.allowed) {
             engine.reversalConfirm[confirmKey] = { count: 0, lastCandleTime: null };
+            if (bot.key === "boll") bumpBollFunnel("reversalCondition", side, false); // v43.10 #16
             blockCandidate("reversal_unconfirmed", permission.reason);
             return;
           }
@@ -2726,17 +2783,24 @@ async function runEngineStep() {
           // Same closed candle: do not inflate. Fresh v43.7 uses permission
           // computed from that closed candle too, so count and evidence align.
           if (engine.reversalConfirm[confirmKey].count < 2) {
+            if (bot.key === "boll") bumpBollFunnel("reversalCondition", side, false); // v43.10 #16 — folded in with the permission check above, same veto type
             blockCandidate("reversal_unconfirmed", "Reversal setup looks valid — needs two consecutive fully-closed candles before entering");
             return;
           }
+          if (bot.key === "boll") bumpBollFunnel("reversalCondition", side, true); // v43.10 #16
         }
+
 
         // Volume confirmation filter: skip entries where the move isn't backed
         // by participation. Applied as a filter across all strategies rather
         // than as its own bot.
         if (engine.useVolumeFilter && s.volRatio !== null && s.volRatio !== undefined) {
-          if (s.volRatio < 0.8) { blockCandidate("thin_volume", `Vetoed: volume ${s.volRatio.toFixed(2)}x average, too thin to confirm the move`); return; }
+          if (s.volRatio < 0.8) {
+            if (bot.key === "boll") bumpBollFunnel("volumeCondition", side, false); // v43.10 #16
+            blockCandidate("thin_volume", `Vetoed: volume ${s.volRatio.toFixed(2)}x average, too thin to confirm the move`); return;
+          }
         }
+        if (bot.key === "boll") bumpBollFunnel("volumeCondition", side, true); // v43.10 #16
 
         // Correlation / exposure cap: crypto moves together, so 30 longs across
         // 15 coins is really one big bet, not 30 diversified ones. Limit how many
@@ -2771,10 +2835,13 @@ async function runEngineStep() {
           const fightingStrongUp = side === "Short" && coinReg === "bull" && roc !== null && roc >= 2.5;
           const fightingStrongDown = side === "Long" && coinReg === "bear" && roc !== null && roc <= -2.5;
           if (fightingStrongUp || fightingStrongDown) {
+            if (bot.key === "boll") bumpBollFunnel("regimeCondition", side, false); // v43.10 #16 — RSI/Boll's closest regime-based gate, since they're exempt from regime_gate itself
             blockCandidate("severe_contradiction", `${side} vetoed: regime is ${coinReg} AND price still accelerating (${roc.toFixed(1)}% 1h) the same direction — fighting the move, not catching exhaustion`);
             return;
           }
+          if (bot.key === "boll") bumpBollFunnel("regimeCondition", side, true); // v43.10 #16
         }
+
 
         // v32 fix: pre-compute all three trend-bot checks as pure booleans
         // BEFORE acting on any of them. Previously, whichever fired first got
@@ -2829,7 +2896,10 @@ async function runEngineStep() {
         }
         if (!stop || stop === entry) return;
         const stopDistPct = Math.abs(entry - stop) / entry;
-        if (stopDistPct < 0.012) { blockCandidate("stop_too_tight", `Vetoed: stop distance only ${(stopDistPct*100).toFixed(2)}% — too tight to be a meaningful risk boundary`); return; } // require at least ~1.2% room to the stop
+        if (stopDistPct < 0.012) {
+          if (bot.key === "boll") bumpBollFunnel("economicsCondition", side, false); // v43.10 #16
+          blockCandidate("stop_too_tight", `Vetoed: stop distance only ${(stopDistPct*100).toFixed(2)}% — too tight to be a meaningful risk boundary`); return;
+        } // require at least ~1.2% room to the stop
 
         // Base target: 2.5x the stop distance.
         let target = side === "Long" ? entry * (1 + stopDistPct * 2.5) : entry * (1 - stopDistPct * 2.5);
@@ -2860,6 +2930,7 @@ async function runEngineStep() {
         // on the wrong side of entry (structure already exhausted) — this
         // is the case Math.abs() below would have silently missed.
         if (!validDirectionalPlan(side, entry, stop, target)) {
+          if (bot.key === "boll") bumpBollFunnel("economicsCondition", side, false); // v43.10 #16
           blockCandidate("structure_exhausted", `${side} vetoed: structural target capping left no valid target ahead of entry (price already past the relevant support/resistance level)`);
           return;
         }
@@ -2869,9 +2940,15 @@ async function runEngineStep() {
         if (actualTargetDistPct < stopDistPct * 0.8) {
           // Capping to real structure left too little reward to justify the
           // risk — reject rather than take a trade with poor real economics.
+          if (bot.key === "boll") bumpBollFunnel("economicsCondition", side, false); // v43.10 #16
           blockCandidate("target_capped", `After capping to real structure, reward (${(actualTargetDistPct*100).toFixed(2)}%) no longer justifies the risk (${(stopDistPct*100).toFixed(2)}%)`);
           return;
         }
+        // v43.10 #16 note: economicsCondition "pass" is bumped once, later,
+        // right before the position actually opens — not here — since
+        // below_min_profit / target_infeasible / the final exposure_cap
+        // re-check can still fail a candidate that passed this far.
+
 
         const notionalFromLeverage = acc.cash * engine.leverage;
         const riskCapFraction = 0.20; // never risk more than 20% of this pot on one trade
@@ -2886,7 +2963,10 @@ async function runEngineStep() {
         const expectedFees = notional * engine.feePct * 2;
         const expectedNet = expectedGross - expectedFees;
         const minProfit = engine.minProfit !== undefined ? engine.minProfit : 15;
-        if (expectedNet < minProfit) { blockCandidate("below_min_profit", `Vetoed: expected profit $${expectedNet.toFixed(2)} is below the $${minProfit} minimum`); return; }
+        if (expectedNet < minProfit) {
+          if (bot.key === "boll") bumpBollFunnel("economicsCondition", side, false); // v43.10 #16
+          blockCandidate("below_min_profit", `Vetoed: expected profit $${expectedNet.toFixed(2)} is below the $${minProfit} minimum`); return;
+        }
 
         // Reachability check: is the target a move this coin actually makes?
         // Compare the required distance against the coin's own average daily
@@ -2894,6 +2974,7 @@ async function runEngineStep() {
         const tp3MovePct = actualTargetDistPct;
         const avgDailyRangePct = s.avgDailyRangePct;
         if (avgDailyRangePct && tp3MovePct > avgDailyRangePct * 1.2) {
+          if (bot.key === "boll") bumpBollFunnel("economicsCondition", side, false); // v43.10 #16
           blockCandidate("target_infeasible", `Target needs a ${(tp3MovePct*100).toFixed(1)}% move but ${coin} typically ranges ${(avgDailyRangePct*100).toFixed(1)}%/day (based on ${s.dailyRangeDaysUsed || "?"} day${s.dailyRangeDaysUsed === 1 ? "" : "s"} of data)`);
           return;
         }
@@ -2994,6 +3075,7 @@ async function runEngineStep() {
             if (a2 && a2.position && a2.position.side === side) sameDirNow++;
           });
           if (sameDirNow >= engine.maxSameDirection) {
+            if (bot.key === "boll") bumpBollFunnel("economicsCondition", side, false); // v43.10 #16 — final exposure re-check, grouped with economics as the last gate before opening
             blockCandidate("exposure_cap", `${side} vetoed at final check: another concurrent entry already reached the ${engine.maxSameDirection}-position exposure cap first`);
             return;
           }
@@ -3019,6 +3101,11 @@ async function runEngineStep() {
           if (engine) { const h = ensureApiHealth(); if (h) h.persistenceBlockedEntries = (h.persistenceBlockedEntries || 0) + 1; }
           return;
         }
+        // v43.10 #16: reached this point having survived every veto — this is
+        // both the final "economicsCondition pass" and "finalAccepted"/trade-
+        // opened moment, since nothing between here and acc.position being
+        // set below can still fail the candidate.
+        if (bot.key === "boll") { bumpBollFunnel("economicsCondition", side, true); bumpBollFunnel("finalAccepted", side, true); }
         // v43.8 measurement-only market-wave context: current legacy correlation only
         // notices same coin+direction across strategies. Count broader same-direction crypto
         // exposure and recent entries across ALL strategies/coins without changing allocation.
@@ -3162,14 +3249,157 @@ function pruneCountedShadowIds() {
   });
   engine.countedShadowIds = keep;
 }
+// v43.10 storage reliability patch — Resolve -> Fold -> Compact.
+// ---------------------------------------------------------------------------
+// Root cause fixed: resolved shadows previously stayed in shadowTrades /
+// continuationShadows in full verbose form indefinitely (only evicted
+// reactively once the array exceeded its cap, oldest-resolved-first). Since
+// every resolved shadow's scientific outcome was ALREADY being folded into
+// engine.shadowTotals[vetoType] (via the existing st.counted /
+// engine.countedShadowIds exact-once journal in finalizeShadowResolution),
+// keeping the full verbose object around after that point added storage
+// cost with no additional scientific value — this was the dominant
+// component of the 3.5MB research ceiling being reached in under 8 hours.
+//
+// Fix: once a shadow is resolved AND its outcome is durably folded
+// (st.counted === true), only the SHADOW_FORENSIC_WINDOW most recently
+// resolved records per array are kept in full detail for manual inspection.
+// Everything older is compacted to a minimal stub — NOT deleted outright,
+// so a compacted record's id/outcome/hypothetical P/L remains directly
+// inspectable in the trade log without needing to reconstruct it from
+// aggregates. This is not evidence loss (v43.10 req #12): the scientific
+// result was already permanently captured in engine.shadowTotals /
+// engine.shadowTotalsByStrategy / the target-cap paired registry before
+// compaction ever touches the record.
+//
+// Robustness: NOT all resolution code paths call finalizeShadowResolution()
+// directly (some set st.status = "resolved" inline). foldAnyUncountedShadows
+// below sweeps both arrays for status==="resolved" && !counted before
+// compacting, so folding happens exactly once regardless of which path
+// resolved a given shadow — the sweep, not any single call site, is the
+// guarantee.
+const SHADOW_FORENSIC_WINDOW = 150; // most-recent resolved shadows kept in full detail per array; DELIBERATELY conservative vs the 100-200 range agreed, see registry
+const SHADOW_COMPANION_FORENSIC_WINDOW = 20; // v43.10 req #5: companions get a lighter lifecycle — their pairing result is already fully captured in engine.targetCapEventRegistry once resolved, so only a small spot-check window is kept, not the full forensic window
+const SHADOW_COMPACTED_STUB_CAP = 5000; // v43.10: without this, compacted stubs (small as they are) would still accumulate without limit over a multi-day run, making growth slower but never actually bounded. Beyond this many stubs per array, the OLDEST are dropped entirely — their scientific outcome is already permanently folded into shadowTotals/shadowTotalsByStrategy/targetCapEventRegistry, so this is not evidence loss (v43.10 req #12), just the final step of the same compaction the stub itself already represents.
+function foldAnyUncountedShadows(engineRef) {
+  if (!engineRef) return 0;
+  let folded = 0;
+  [shadowTrades, continuationShadows].forEach(arr => {
+    arr.forEach(st => {
+      if (st && st.status === "resolved" && !st.counted) {
+        finalizeShadowResolution(st, engineRef); // idempotent; sets st.counted via the existing journal
+        folded++;
+      }
+    });
+  });
+  return folded;
+}
+function compactShadowRecord(st) {
+  // Minimal forensic stub. Deliberately excludes: reason (free text), entry/
+  // stop/target/resolvedPrice (reconstructable from hypotheticalPnl's sign
+  // and not needed once outcome is known), actualPnl/notional/feePct/
+  // maxHoldMs (only needed pre-resolution). Keeps everything a report line
+  // or a forensic lookup by id actually needs.
+  return {
+    id: st.id, t: st.t, resolvedAt: st.resolvedAt !== undefined ? st.resolvedAt : null,
+    bot: st.bot, coin: st.coin, side: st.side, vetoType: st.vetoType,
+    resolution: st.resolution, hypotheticalPnl: st.hypotheticalPnl !== undefined ? st.hypotheticalPnl : null,
+    pairedResearchOnly: !!st.pairedResearchOnly, decisionCycleId: st.decisionCycleId || null,
+    counted: true, compacted: true,
+  };
+}
+function compactShadowArray(arr) {
+  const pending = arr.filter(st => st.status === "pending");
+  const notYetFolded = arr.filter(st => st.status !== "pending" && st.counted !== true);
+  const foldedMain = arr.filter(st => st.status !== "pending" && st.counted === true && !st.pairedResearchOnly);
+  const foldedCompanion = arr.filter(st => st.status !== "pending" && st.counted === true && st.pairedResearchOnly);
+  function compactSubset(list, window) {
+    list.sort((a, b) => (b.resolvedAt || b.t || 0) - (a.resolvedAt || a.t || 0));
+    const keepFull = list.slice(0, window);
+    const beyondWindow = list.slice(window);
+    const alreadyCompacted = beyondWindow.filter(st => st.compacted === true);
+    const toCompactNow = beyondWindow.filter(st => st.compacted !== true).map(compactShadowRecord);
+    // v43.10: hard cap on accumulated stubs — without this, growth is much
+    // slower than before compaction existed, but still technically unbounded
+    // over a multi-day run. Beyond the cap, the OLDEST stubs are dropped
+    // outright; their outcome is already durably folded into the cumulative
+    // aggregates, so this is the final step of the same compaction, not new
+    // evidence loss.
+    const allStubs = alreadyCompacted.concat(toCompactNow).sort((a, b) => (b.resolvedAt || b.t || 0) - (a.resolvedAt || a.t || 0));
+    const keptStubs = allStubs.slice(0, SHADOW_COMPACTED_STUB_CAP);
+    return { kept: keepFull.concat(keptStubs), compactedNow: toCompactNow.length };
+  }
+  const mainC = compactSubset(foldedMain, SHADOW_FORENSIC_WINDOW);
+  const compC = compactSubset(foldedCompanion, SHADOW_COMPANION_FORENSIC_WINDOW);
+  return {
+    array: pending.concat(notYetFolded, mainC.kept, compC.kept),
+    compactedNow: mainC.compactedNow + compC.compactedNow,
+  };
+}
+function runShadowCompactionSweep(engineRef) {
+  if (!engineRef) return { folded: 0, compactedMain: 0, compactedCont: 0 };
+  const folded = foldAnyUncountedShadows(engineRef);
+  const mainResult = compactShadowArray(shadowTrades);
+  const contResult = compactShadowArray(continuationShadows);
+  shadowTrades = mainResult.array;
+  continuationShadows = contResult.array;
+  engineRef.shadowCompactionStats = {
+    lastRunAt: Date.now(),
+    totalCompactedMain: (engineRef.shadowCompactionStats && engineRef.shadowCompactionStats.totalCompactedMain || 0) + mainResult.compactedNow,
+    totalCompactedCont: (engineRef.shadowCompactionStats && engineRef.shadowCompactionStats.totalCompactedCont || 0) + contResult.compactedNow,
+    forensicWindow: SHADOW_FORENSIC_WINDOW,
+  };
+  return { folded, compactedMain: mainResult.compactedNow, compactedCont: contResult.compactedNow };
+}
+// v43.10 storage growth/runway reporting. A bounded hourly snapshot history
+// (tiny storage cost — max 48 small records) lets the report distinguish
+// RECENT growth rate from the lifetime-average "naive runway" already
+// computed elsewhere, which gets diluted by old data and can mask a rate
+// that only became unsustainable recently (e.g. right after a build change
+// that added new instrumentation).
+const STORAGE_GROWTH_SNAPSHOT_INTERVAL_MS = 3600000; // 1 hour
+const STORAGE_GROWTH_SNAPSHOT_WINDOW = 48; // 48 hourly snapshots
+function recordStorageGrowthSnapshot(engineRef) {
+  if (!engineRef) return;
+  if (!Array.isArray(engineRef.storageGrowthSnapshots)) engineRef.storageGrowthSnapshots = [];
+  const snaps = engineRef.storageGrowthSnapshots;
+  const last = snaps[snaps.length - 1];
+  const now = Date.now();
+  if (last && (now - last.t) < STORAGE_GROWTH_SNAPSHOT_INTERVAL_MS) return; // not due yet
+  let bytes = 0;
+  try { bytes = approxJsonBytes(engineRef) || 0; } catch (_) { return; }
+  const shadowsCreatedSoFar = engineRef.shadowCreatedCount || 0;
+  snaps.push({ t: now, bytes, shadowCreatedCount: shadowsCreatedSoFar });
+  if (snaps.length > STORAGE_GROWTH_SNAPSHOT_WINDOW) snaps.splice(0, snaps.length - STORAGE_GROWTH_SNAPSHOT_WINDOW);
+}
+function storageGrowthStats(engineRef) {
+  if (!engineRef || !Array.isArray(engineRef.storageGrowthSnapshots) || engineRef.storageGrowthSnapshots.length < 2) return null;
+  const snaps = engineRef.storageGrowthSnapshots;
+  const first = snaps[0], last = snaps[snaps.length - 1];
+  const hours = (last.t - first.t) / 3600000;
+  if (hours <= 0) return null;
+  return {
+    bytesPerHour: (last.bytes - first.bytes) / hours,
+    shadowsPerHour: (last.shadowCreatedCount - first.shadowCreatedCount) / hours,
+    windowHours: hours,
+    snapshotCount: snaps.length,
+  };
+}
 function saveShadowArraysAtomic() {
   if (engine) {
+    runShadowCompactionSweep(engine); // v43.10: fold + compact BEFORE the single atomic write below
+    // v43.10 final reliability correction: first attach the authoritative
+    // post-compaction arrays/logs and prune the exact-once journal, THEN take
+    // the hourly storage snapshot. This makes the measured growth/runway
+    // reflect the payload that is actually about to be persisted rather than
+    // stale pre-compaction engine references from the previous save.
     engine.shadowTrades = shadowTrades;
     engine.continuationShadows = continuationShadows;
     engine.vetoLog = vetoLog;
     engine.engineEvents = engineEvents;
     engine.ambiguousCandleCount = ambiguousCandleCount;
     pruneCountedShadowIds();
+    recordStorageGrowthSnapshot(engine); // authoritative post-compaction payload, immediately before save
     return saveEngine(); // ONE write — arrays and shadowTotals commit together or not at all
   }
   const a = safeLocalStorageSet("tm2_shadow", JSON.stringify(shadowTrades));
@@ -4276,7 +4506,7 @@ function generateReport() {
   out += `STRATEGY COMPARISON REPORT\nGenerated: ${new Date().toLocaleString()}\nRunning since: ${new Date(engine.startedAt).toLocaleString()}\n`;
   out += `Build that started this run: ${engine.startBuildTag || "(not recorded — pre-P2-3 save; current page build was " + BUILD_TAG + ")"}\n`;
   out += `Current page build: ${BUILD_TAG}${runBuildMismatch() ? " — BUILD CHANGED: new entries blocked; Reset required for a clean benchmark" : ""}\n`;
-  out += `Parent source identity: v43.8 SHA-256 ${BUILD_PARENT_SHA256} | MD5 ${BUILD_PARENT_MD5}\n`;
+  out += `Parent source identity: v43.9 SHA-256 ${BUILD_PARENT_SHA256} | MD5 ${BUILD_PARENT_MD5}\n`;
   if (startupIntegrityBlocked) out += `STARTUP INTEGRITY WARNING: corrupted/unreadable persisted research data was detected (${startupIntegrityWarnings.map(x => x.key).join(", ")}). This state is NOT a clean benchmark baseline; verified Reset required.\n`;
   out += `Coin universe at start: ${engine.startCoinList ? engine.startCoinList.join(", ") : "(not recorded — pre-P2-3 save; current is " + coinList.join(", ") + ")"}\n`;
   out += `Auto-add at start: ${engine.startBuildTag ? (engine.startAutoAddOn ? "ON" : "OFF") : "(not recorded)"} | Fixed-universe benchmark lock: ${engine.benchmarkLock ? "ON" : "OFF"}\n`;
@@ -4429,7 +4659,7 @@ function generateReport() {
   out += `Regime telemetry integrity: ${teleClean ? "CLEAN" : "INCOMPLETE / CHECK ERRORS"} | errors ${hReg ? (hReg.regimeTelemetryErrors || 0) : 0} | reconstruction mismatches ${hReg ? (hReg.regimeDiagnosticMismatchCount || 0) : 0}\n`;
   try { out += `Current browser localStorage estimate: ${(estimateLocalStorageBytes()/1024/1024).toFixed(2)} MB | research soft ceiling ${(RESEARCH_STORAGE_SOFT_CEILING_BYTES/1024/1024).toFixed(2)} MB\n`; } catch (_) {}
 
-  out += `\n=== TRADE / REGIME LINKAGE (v43.8 telemetry window only) ===\n`;
+  out += `\n=== TRADE / REGIME LINKAGE (regime-integrity-era telemetry window only) ===\n`;
   const linkTrades = (engine.allTradesEver || []).filter(t => Number.isFinite(t.openedAt));
   let linkedN = 0;
   linkTrades.forEach(t => {
@@ -4442,7 +4672,7 @@ function generateReport() {
     const override = Number.isFinite(r[7]) && Math.abs(r[7]) >= 150 ? "yes" : "no";
     out += `${t.botLabel || t.bot} ${t.coin} ${t.side} | score ${t.entryScore == null ? "n/a" : t.entryScore} | entry +${entrySec}s after 15m boundary | confirmed-regime age ${ageCandles} candle(s) | closed ROC ${r[7] == null ? "n/a" : (r[7]/100).toFixed(2)+"%"} | ROC override ${override} | MFE ${t.mfePct == null ? "n/a" : t.mfePct.toFixed(2)+"%"} | MAE ${t.maePct == null ? "n/a" : t.maePct.toFixed(2)+"%"} | ${t.result || "open"}\n`;
   });
-  if (!linkedN) out += `No completed trade currently overlaps the v43.8 telemetry window.\n`;
+  if (!linkedN) out += `No completed trade currently overlaps the regime-integrity-era telemetry window.\n`;
   out += `\nCompact closed-candle tuple schema: [closedOpenMs, closedRaw, confirmed, streak, skipped, ATRbp, closedSlow, closedROCbp, liveRaw, liveSlow, liveROCbp]; regime codes -1=bear, 0=mixed, 1=bull.\n`;
   out += `Compact exit tuple schema: [atMs, coin, botIndex, side, positionOpenedAt, liveRaw, closedRaw, stable, legacyStreak, formingCandleOpenMs, liveROCbp, liveSlow, event]; event 0=state transition, 1=legacy 2-refresh would-close, 2=actual stable exit.\n`;
   // Include bounded compact raw arrays so later forensic analysis can be done
@@ -4551,6 +4781,22 @@ function generateReport() {
   out += `=== BOUNDED SHADOW DETAIL (latest up to 2000 blocked-candidate / 1000 continuation records; ${runShadows.length} entries retained this run) — the CUMULATIVE totals reported earlier are the actual whole-run figures, not this list ===\n`;
   if (!runShadows.length) out += "None this run.\n";
   runShadows.forEach(st => {
+    // v43.10 fix: a compacted record (st.compacted === true) only retains a
+    // minimal field set — id/t/resolvedAt/bot/coin/side/vetoType/resolution/
+    // hypotheticalPnl/decisionCycleId — by design (its full scientific
+    // outcome is already durably folded into shadowTotals/
+    // shadowTotalsByStrategy/targetCapEventRegistry; compaction exists
+    // specifically to stop carrying the heavier fields below). Printing it
+    // through the full-detail line below produced "Entry $— Stop $— Target
+    // $—" and the literal string "Reason: undefined" — accurate to what the
+    // stub actually contains, but misleading formatting for a record that
+    // was never meant to carry those fields post-compaction. Detected and
+    // given its own explicit, honestly-labeled line instead.
+    if (st.compacted === true) {
+      const compactResStr = st.resolution === "would_win" ? "WOULD HAVE WON" : st.resolution === "would_lose" ? "WOULD HAVE LOST" : st.resolution === "ambiguous" ? "AMBIGUOUS (both levels touched, sequence uncertain)" : st.resolution === "would_timeout" ? "WOULD HAVE TIMED OUT" : "UNRESOLVED";
+      out += `[COMPACTED RESOLVED RECORD] [${new Date(st.t).toLocaleString()}] id ${st.id} | ${BOTS.find(x=>x.key===st.bot)?.label || st.bot} | ${st.coin} ${st.side} | ${vLabels[st.vetoType] || st.vetoType} | ${compactResStr}${st.resolvedAt ? ` | Resolved: ${new Date(st.resolvedAt).toLocaleString()}` : ""} | Hypothetical P/L $${fmt(st.hypotheticalPnl)}${st.decisionCycleId ? ` | decisionCycleId ${st.decisionCycleId}` : ""} | Full entry/stop/target/reason were compacted after outcome folding — see cumulative totals, not this line, for anything beyond this record's own identity and outcome.\n`;
+      return;
+    }
     // v37 fix: ambiguous resolutions fell into the generic fallback and
     // displayed as "TIMED OUT (unresolved)" — misleading, since they were
     // genuinely resolved, just with an uncertain sequence. Now labeled explicitly.
@@ -4694,15 +4940,25 @@ function generateReport() {
     groups.forEach(rows => { for (let i=1;i<rows.length;i++) if (rows[i].t - rows[i-1].t <= 25*60000) repeats++; });
     return repeats;
   })();
-  out += `\n=== V43.8 TARGET-CAP EVENT-LEVEL RESEARCH ===\n`;
+  out += `\n=== V43.10 TARGET-CAP EVENT-LEVEL RESEARCH ===\n`;
   out += `Raw capped-target shadow rows retained: ${capRows.length} | unique decision-cycle coin+side event(s): ${capClusters.size} | rows participating in cross-strategy duplicate clusters: ${capDuplicateParticipants} | redundant rows after exact cycle-level dedup: ${capRedundant} | same-strategy repeat episode(s) within 25m: ${capSameStrategyRepeats}\n`;
   out += `Original-uncapped companion shadows retained: ${capOrigRows.length}. These are the counterfactual needed to distinguish 'capped target would hit' from 'original 2.5R target would hit'.\n`;
   if (capRows.length) {
-    out += `Full currently retained target-cap rows (bounded raw detail; cumulative resolved pair outcomes are preserved in the v43.9 registry below):\n`;
-    capRows.forEach(st => { out += `  ${new Date(st.t).toLocaleString()} | cycle ${st.decisionCycleId || "legacy"} | ${st.bot} ${st.coin} ${st.side} | entry ${st.entry} stop ${st.stop} capped ${st.target} original ${st.originalTarget == null ? "n/a" : st.originalTarget} | ${st.status}${st.resolution ? `/${st.resolution}` : ""}\n`; });
+    out += `Full currently retained target-cap rows (bounded raw detail; cumulative resolved pair outcomes are preserved in the v43.10 registry below):\n`;
+    // v43.10 fix: same compacted-stub issue as BOUNDED SHADOW DETAIL above —
+    // capRows can include compacted records (no entry/stop/target/status),
+    // which printed literal "undefined" here before this check existed.
+    capRows.forEach(st => {
+      if (st.compacted === true) {
+        out += `  [COMPACTED] ${new Date(st.t).toLocaleString()} | cycle ${st.decisionCycleId || "legacy"} | ${st.bot} ${st.coin} ${st.side} | ${st.resolution || "unresolved"} | hypothetical P/L $${fmt(st.hypotheticalPnl)} — entry/stop/target compacted after outcome folding, see cumulative registry\n`;
+        return;
+      }
+      out += `  ${new Date(st.t).toLocaleString()} | cycle ${st.decisionCycleId || "legacy"} | ${st.bot} ${st.coin} ${st.side} | entry ${st.entry} stop ${st.stop} capped ${st.target} original ${st.originalTarget == null ? "n/a" : st.originalTarget} | ${st.status}${st.resolution ? `/${st.resolution}` : ""}\n`;
+    });
   }
 
-  out += `\n=== V43.9 SHADOW EVENT-LEVEL DEDUPLICATION ===\n`;
+
+  out += `\n=== V43.10 SHADOW EVENT-LEVEL DEDUPLICATION ===\n`;
   const dStats = engine.shadowDedupStats && engine.shadowDedupStats.byType ? engine.shadowDedupStats.byType : {};
   if (!Object.keys(dStats).length) out += `No dedup rows recorded yet.\n`;
   else Object.entries(dStats).sort((a,b)=>(b[1].rawRows||0)-(a[1].rawRows||0)).forEach(([vt,d]) => {
@@ -4710,7 +4966,7 @@ function generateReport() {
   });
   out += `Cumulative creation-time dedup statistics; target-cap paired outcomes are preserved separately below.\n`;
 
-  out += `\n=== V43.9 SCORE SUB-CHECK OUTCOME RESEARCH ===\n`;
+  out += `\n=== V43.10 SCORE SUB-CHECK OUTCOME RESEARCH ===\n`;
   const scoreTrades = (engine.allTradesEver || []).filter(t => t.entrySnapshot && t.entrySnapshot.scoreBreakdown && t.entrySnapshot.scoreBreakdown.subchecks && t.result !== "Ambiguous");
   const scoreChecks = [["SMA10/30 aligned","sma10_30Aligned"],["price/SMA96 aligned","priceVsSma96Aligned"],["price/SMA192 aligned","priceVsSma192Aligned"],["MACD direction aligned","macdDirectionAligned"],["RSI healthy band","rsiHealthyBand"],["RSI extreme countertrend","rsiExtremeCountertrend"]];
   if (!scoreTrades.length) out += `No decided scored trades yet.\n`;
@@ -4718,37 +4974,106 @@ function generateReport() {
   const tripleTrend=scoreTrades.filter(t=>{const q=t.entrySnapshot.scoreBreakdown.subchecks;return q.sma10_30Aligned&&q.priceVsSma96Aligned&&q.priceVsSma192Aligned;});
   out += `All three trend sub-checks aligned simultaneously: ${tripleTrend.length}/${scoreTrades.length} decided trade(s) — direct double-counting diagnostic.\n`;
 
-  out += `\n=== V43.9 GLOBAL MARKET-WAVE RESEARCH ===\n`;
+  out += `\n=== V43.10 GLOBAL MARKET-WAVE RESEARCH (by strategy — see below) ===\n`;
   const waveTrades=(engine.allTradesEver||[]).filter(t=>t.result!=="Ambiguous");
   const waveBuckets=[["0 same-direction already open",t=>(t.globalSameDirectionOpenAtEntry||0)===0],["1-2 same-direction already open",t=>(t.globalSameDirectionOpenAtEntry||0)>=1&&(t.globalSameDirectionOpenAtEntry||0)<=2],["3+ same-direction already open",t=>(t.globalSameDirectionOpenAtEntry||0)>=3],["0 same-direction entries in prior 20m",t=>(t.recentSameDirection20mAtEntry||0)===0],["1-2 same-direction entries in prior 20m",t=>(t.recentSameDirection20mAtEntry||0)>=1&&(t.recentSameDirection20mAtEntry||0)<=2],["3+ same-direction entries in prior 20m",t=>(t.recentSameDirection20mAtEntry||0)>=3]];
+  out += `-- Pooled across all strategies --\n`;
   waveBuckets.forEach(([label,pred])=>{const a=waveTrades.filter(pred),w=a.filter(t=>t.result==="Win").length,l=a.filter(t=>t.result==="Loss").length,net=a.reduce((x,t)=>x+(t.netPnl||0),0);out += `${label}: ${a.length} trade(s) | ${w}W/${l}L | net $${fmt(net)} | avg $${fmt(a.length?net/a.length:0)}\n`;});
+  // v43.10 addition #17: pooled results can be confounded by strategy mix —
+  // e.g. if one strategy both trades disproportionately often AND performs
+  // poorly, it can make "wave size" look predictive when it's partly/wholly
+  // picking up "this is where that strategy's trades happen to fall". Break
+  // the same buckets down by strategy so a genuine wave-size effect can be
+  // distinguished from strategy concentration. Measurement only — no
+  // market-wave veto or exposure cap implemented here.
+  out += `-- By strategy (same buckets; distinguishes a genuine wave-size effect from strategy concentration) --\n`;
+  BOTS.forEach(b => {
+    const stratTrades = waveTrades.filter(t => t.bot === b.key);
+    if (!stratTrades.length) { out += `${b.label || b.key}: no decided trades yet\n`; return; }
+    out += `${b.label || b.key} (${stratTrades.length} total decided trades):\n`;
+    waveBuckets.forEach(([label,pred])=>{
+      const a=stratTrades.filter(pred);
+      if (!a.length) { out += `  ${label}: no trades in this bucket\n`; return; }
+      const w=a.filter(t=>t.result==="Win").length,l=a.filter(t=>t.result==="Loss").length,net=a.reduce((x,t)=>x+(t.netPnl||0),0);
+      out += `  ${label}: ${a.length} trade(s) | ${w}W/${l}L | net $${fmt(net)} | avg $${fmt(a.length?net/a.length:0)}\n`;
+    });
+  });
   out += `Measurement only; no portfolio-wide exposure cap changed.\n`;
 
-  out += `\n=== V43.9 PROFIT-PROTECTION COUNTERFACTUALS ===\n`;
+
+  out += `\n=== V43.10 PROFIT-PROTECTION COUNTERFACTUALS ===\n`;
   const prTrades=(engine.allTradesEver||[]).filter(t=>t.profitProtectionCounterfactuals&&t.result!=="Ambiguous");
   const prRules=[["Break-even after +1R","be1R"],["Lock +0.5R after +1R","lock05At1R"],["1R trailing stop after +1R","trail1R"],["Take 50% at +1R; remainder actual exit","halfAt1R"]];
-  if(!prTrades.length) out += `No decided v43.9 trades with counterfactual samples yet.\n`;
+  if(!prTrades.length) out += `No decided trades with counterfactual samples yet.\n`;
   else prRules.forEach(([label,key])=>{const rows=prTrades.map(t=>t.profitProtectionCounterfactuals[key]).filter(Boolean),armed=rows.filter(r=>r.armedAt).length,virtual=rows.filter(r=>r.armedAt&&r.virtualExitAt&&key!=="halfAt1R").length,delta=rows.reduce((a,r)=>a+(r.deltaVsActual||0),0);out += `${label}: ${rows.length} trade(s) | armed ${armed} | virtual stop exits ${virtual} | aggregate delta vs actual $${fmt(delta)} | avg delta $${fmt(rows.length?delta/rows.length:0)}\n`;});
   out += `Precision is live-refresh chronological (~30s), not tick-perfect; real exits are unchanged.\n`;
 
-  out += `\n=== V43.9 DONCHIAN RE-ARM INTEGRITY ===\n`;
+  out += `\n=== V43.10 DONCHIAN RE-ARM INTEGRITY ===\n`;
   const drs=ensureDonchianRearmStats()||{};
-  out += `Locks created ${drs.locksCreated||0} | valid post-exit candle clears ${drs.validClears||0} | v43.8 legacy premature-clear opportunities prevented ${drs.legacyPrematureClearOpportunities||0} | candidate signals while locked ${drs.candidatesWhileLocked||0} | logged re-arm veto episodes ${drs.rearmVetoes||0}\n`;
+  const throttledDuplicateEvaluations = Math.max(0, (drs.candidatesWhileLocked||0) - (drs.rearmVetoes||0));
+  out += `Locks created ${drs.locksCreated||0} | valid post-exit candle clears ${drs.validClears||0} | legacy premature-clear opportunities prevented ${drs.legacyPrematureClearOpportunities||0} | candidate signals evaluated while locked ${drs.candidatesWhileLocked||0} | distinct logged veto episodes ${drs.rearmVetoes||0}\n`;
+  // v43.10 addition #19: the gap between "candidate signals while locked" and
+  // "logged re-arm veto episodes" is NOT veto ordering — donchian_rearm is
+  // checked before every other gate (volume, stop distance, economics), so a
+  // candidate that reaches this check while locked is blocked immediately,
+  // every time, unconditionally. The actual explanation, confirmed by
+  // reading blockCandidate() itself: veto LOGGING (not blocking) is throttled
+  // to once per 20-minute episode per (strategy, coin, side) — a lock that
+  // stays active across multiple 30s refresh cycles for 30+ minutes produces
+  // many "while locked" evaluations but only one logged episode per 20-min
+  // window. The counters were never meant to be equal; they measure
+  // different things (raw evaluation attempts vs. distinct logged episodes),
+  // and now say so explicitly instead of leaving the gap unexplained.
+  out += `Of those ${drs.candidatesWhileLocked||0} evaluations, ${throttledDuplicateEvaluations} were the same lock re-evaluated within an already-logged 20-minute episode (blockCandidate's existing log throttle, not a separate veto-ordering effect) — every evaluation while locked is blocked, but only one per 20-minute episode is logged as a distinct veto.\n`;
   out += `A reset candle must CLOSE after disarmedAt. Pre-exit closed-candle price evidence is diagnostic only and cannot clear the lock.\n`;
 
-  out += `\n=== V43.9 TARGET-CAP CUMULATIVE PAIRED OUTCOMES ===\n`;
+  out += `\n=== V43.10 BOLLINGER GATE DIAGNOSTIC FUNNEL ===\n`;
+  out += `Diagnostic only — does not alter Bollinger's conditions/thresholds. Answers why Bollinger remains at ${(engine.allTradesEver||[]).filter(t=>t.bot==="boll").length} real trade(s) despite the shared RSI/Bollinger closed-volume bug being fixed in v43.9.\n`;
+  const bf = engine.bollingerFunnel || {};
+  const funnelStages = [
+    ["rawSignalOpportunity", "Raw signal opportunity (price crossed a band)"],
+    ["reachedClosedMeanReversionEval", "Reached closed mean-reversion evaluation"],
+    ["reversalCondition", "Reversal condition (permission + 2-candle confirmation)"],
+    ["volumeCondition", "Volume condition"],
+    ["regimeCondition", "Regime condition (severe_contradiction — RSI/Boll's closest regime-based gate, since they're exempt from regime_gate itself)"],
+    ["economicsCondition", "Economics (stop distance, structure/target-cap, min-profit, target feasibility, final exposure re-check)"],
+    ["finalAccepted", "Final candidate accepted / trade opened"],
+  ];
+  funnelStages.forEach(([key, label]) => {
+    const st = bf[key];
+    if (!st) { out += `${label}: no data yet\n`; return; }
+    if (key === "rawSignalOpportunity" || key === "reachedClosedMeanReversionEval" || key === "finalAccepted") {
+      out += `${label}: ${st.pass} (Long ${st.bySide.Long.pass}, Short ${st.bySide.Short.pass})\n`;
+    } else {
+      out += `${label}: ${st.pass} passed / ${st.fail} failed (Long ${st.bySide.Long.pass}P/${st.bySide.Long.fail}F, Short ${st.bySide.Short.pass}P/${st.bySide.Short.fail}F)\n`;
+    }
+  });
+
+
+  out += `\n=== V43.10 TARGET-CAP CUMULATIVE PAIRED OUTCOMES ===\n`;
   const capRegistry=engine.targetCapEventRegistry&&typeof engine.targetCapEventRegistry==="object"?engine.targetCapEventRegistry:{},capEvents=Object.values(capRegistry),paired=capEvents.filter(e=>e.capped&&e.original&&!e.mismatch),pc={bothWin:0,cappedWinOriginalLoss:0,bothLoss:0,other:0,cappedAmb:0,originalAmb:0};
   paired.forEach(e=>{const c=e.capped.resolution,o=e.original.resolution;if(c==="ambiguous")pc.cappedAmb++;if(o==="ambiguous")pc.originalAmb++;if(c==="would_win"&&o==="would_win")pc.bothWin++;else if(c==="would_win"&&o==="would_lose")pc.cappedWinOriginalLoss++;else if(c==="would_lose"&&o==="would_lose")pc.bothLoss++;else pc.other++;});
   out += `Cumulative registry events ${capEvents.length} | fully paired clean events ${paired.length} | mismatch flags ${capEvents.filter(e=>e.mismatch).length}\n`;
   out += `Both win ${pc.bothWin} | capped wins/original loses ${pc.cappedWinOriginalLoss} | both lose ${pc.bothLoss} | other/timeout/mixed ${pc.other} | capped ambiguous ${pc.cappedAmb} | original ambiguous ${pc.originalAmb}\n`;
   const pairedDelta=paired.reduce((a,e)=>a+((e.capped.hypotheticalPnl||0)-(e.original.hypotheticalPnl||0)),0); out += `Aggregate capped-minus-original hypothetical P/L: $${fmt(pairedDelta)}\n`;
 
-  out += `\n=== V43.9 STORAGE COMPONENT ESTIMATE ===\n`;
+  out += `\n=== V43.10 STORAGE COMPONENT ESTIMATE ===\n`;
   const mainShadowRows=shadowTrades.filter(st=>!st.pairedResearchOnly),researchShadowRows=shadowTrades.filter(st=>st.pairedResearchOnly);
   [["Regime telemetry",engine.regimeTelemetry],["Regime-exit telemetry",engine.regimeExitTelemetry],["Real-trade ledger",engine.allTradesEver],["Main shadow detail",mainShadowRows],["Research-only target companions",researchShadowRows],["Continuation shadows",continuationShadows],["Veto detail",vetoLog],["Target-cap cumulative registry",engine.targetCapEventRegistry],["Shadow dedup stats",engine.shadowDedupStats],["Engine events",engineEvents]].forEach(([label,obj])=>{const b=approxJsonBytes(obj);out += `${label}: ${b==null?"n/a":(b/1024).toFixed(1)+" KB"}\n`;});
-  try{const totalB=estimateLocalStorageBytes(),remain=Math.max(0,RESEARCH_STORAGE_SOFT_CEILING_BYTES-totalB),elapsedH=Math.max(.01,(Date.now()-(engine.startedAt||Date.now()))/3600000),rate=totalB/elapsedH;out += `Browser total ${(totalB/1024/1024).toFixed(2)} MB | policy ceiling ${(RESEARCH_STORAGE_SOFT_CEILING_BYTES/1024/1024).toFixed(2)} MB | headroom ${(remain/1024/1024).toFixed(2)} MB | naive runway ${rate>0?(remain/rate).toFixed(1)+"h":"n/a"} at average bytes/hour since start (conservative; includes baseline).\n`;}catch(_){}
+  try{const totalB=estimateLocalStorageBytes(),remain=Math.max(0,RESEARCH_STORAGE_SOFT_CEILING_BYTES-totalB),elapsedH=Math.max(.01,(Date.now()-(engine.startedAt||Date.now()))/3600000),rate=totalB/elapsedH;out += `Browser total ${(totalB/1024/1024).toFixed(2)} MB | policy ceiling ${(RESEARCH_STORAGE_SOFT_CEILING_BYTES/1024/1024).toFixed(2)} MB | headroom ${(remain/1024/1024).toFixed(2)} MB | naive runway ${rate>0?(remain/rate).toFixed(1)+"h":"n/a"} at average bytes/hour since start (conservative; includes baseline).\n`;
+    // v43.10: recent growth rate, distinct from the lifetime average above —
+    // catches a rate that only became unsustainable recently, which a
+    // since-start average dilutes and can hide.
+    const gs = storageGrowthStats(engine);
+    if (gs) {
+      const recentRunwayH = gs.bytesPerHour > 0 ? remain / gs.bytesPerHour : null;
+      out += `Recent growth (last ${gs.windowHours.toFixed(1)}h, ${gs.snapshotCount} hourly snapshots): ${(gs.bytesPerHour/1024).toFixed(1)} KB/hour | ${gs.shadowsPerHour.toFixed(1)} genuine shadows/hour | recent-rate runway ${recentRunwayH!==null?recentRunwayH.toFixed(1)+"h":"n/a (flat or shrinking)"}.\n`;
+    } else {
+      out += `Recent growth: not enough hourly snapshots yet (need 2+, one per hour) — will appear after the run has been active a couple of hours.\n`;
+    }
+  }catch(_){}
 
-  out += `\n=== V43.9 INSTRUMENTATION COMPLETENESS ===\n`;
+  out += `\n=== V43.10 INSTRUMENTATION COMPLETENESS ===\n`;
   const ih=engine.instrumentationHealth||{},installed=engine.instrumentationVersion===V439_INSTRUMENTATION_VERSION;
   out += `Data/shadow evidence integrity is separate from instrumentation completeness. Package ${installed?"INSTALLED":"MISMATCH / OLD RUN"} (${engine.instrumentationVersion||"none"}); runtime research errors ${ih.errors||0}${ih.byModule&&Object.keys(ih.byModule).length?` | ${Object.entries(ih.byModule).map(([k,v])=>`${k}:${v}`).join(", ")}`:""}.\n`;
   out += `Expected modules: closed-volume reversal state; timestamp-safe Donchian re-arm; cumulative shadow dedup counters; score sub-check outcomes; market-wave outcomes; chronological profit-protection counterfactuals; cumulative target-cap paired registry; storage component reporting.\n`;
