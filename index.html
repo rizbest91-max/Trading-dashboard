@@ -733,6 +733,91 @@ function saveToggles() { safeLocalStorageSet(LS_TOGGLES, JSON.stringify(toggles)
 // recorded) — a long-running benchmark's ledger itself still grows
 // unbounded, so this warning remains useful as a heads-up before approaching
 // typical browser localStorage limits (~5-10MB).
+// v43.10-r2 storage-ownership reliability fix.
+// ---------------------------------------------------------------------------
+// Root cause: estimateLocalStorageBytes() (below) sums every key in
+// localStorage for the whole browser origin. Because GitHub Pages hosts
+// different apps (e.g. this dashboard and a separate Research Lab) under the
+// SAME origin, and localStorage is scoped to the origin, not the file path,
+// that origin-wide number was being used directly as the basis for THIS
+// app's 3.50MB research ceiling and shadow-sampling halt decision
+// (projectedStorageBytesWithEngine(), below). Confirmed in a real run: 189
+// genuine shadows were skipped when the dashboard's own explicitly-itemized
+// components summed to only ~0.64MB, while origin-wide storage read 4.45MB —
+// the halt fired because of data this app does not own and cannot control.
+// Fix: the ceiling/halt now uses ONLY dashboard-owned bytes (this app's own
+// tm2_-prefixed keys). Origin-wide storage is still measured and reported
+// separately, since real browser-quota exhaustion is genuinely origin-wide —
+// it becomes a warning, not the halt trigger. A per-key classification table
+// is added so any future unexplained growth can be attributed to an actual
+// key rather than guessed at.
+//
+// This revision is internal (storage-measurement only) — BUILD_TAG is
+// deliberately left unchanged so a page reload mid-run does not trigger a
+// build-mismatch against an already-started v43.10 session. Track this
+// patch's own identity separately:
+const STORAGE_ACCOUNTING_REVISION = "v43.10-r2 (dashboard-current vs whole-origin storage split; stale-legacy keys visible but excluded from the ceiling after independent audit correction)";
+const DASHBOARD_KEY_PREFIX = "tm2_";
+// Every key this exact build actively reads/writes. Any OTHER tm2_-prefixed
+// key found in localStorage is still this app's own data (a prior version
+// wrote it) but is no longer referenced by current code — classified
+// separately as stale/legacy so it's visible without being silently ignored
+// OR silently auto-deleted. Identification only in this patch; cleanup is a
+// deliberate separate action, per the agreed scope.
+const DASHBOARD_ACTIVE_KEYS = new Set([
+  "tm2_coins", "tm2_toggles", "tm2_engine", "tm2_persistenceDegradedLatch", "tm2_autoadded", "tm2_blocked",
+  "tm2_shadow", "tm2_continuation", "tm2_events", "tm2_vetoes", "tm2_ambiguous",
+  "tm2_apiBlockedUntil", "tm2_storage_probe",
+]); // literal strings, not LS_* variable references — several LS_* constants (e.g. LS_AUTOADDED/LS_BLOCKED) are declared much later in the file, and referencing them here would throw (temporal dead zone) since this runs at script-parse time
+// Other known same-origin apps, so the table can name them specifically
+// rather than lumping everything non-dashboard into one bucket.
+const KNOWN_OTHER_ORIGIN_APPS = [
+  { prefix: "cryptoResearchLab_v1_", label: "research-lab" },
+];
+function classifyStorageKey(key) {
+  if (key.indexOf(DASHBOARD_KEY_PREFIX) === 0) {
+    return DASHBOARD_ACTIVE_KEYS.has(key) ? "dashboard-current" : "dashboard-stale-legacy";
+  }
+  for (const app of KNOWN_OTHER_ORIGIN_APPS) {
+    if (key.indexOf(app.prefix) === 0) return app.label;
+  }
+  return "unknown/other";
+}
+// v43.10-r2 correction (post-audit): counts dashboard-current keys ONLY —
+// this is what the 3.50MB ceiling and the shadow-sampling halt are based on.
+// Originally this also counted dashboard-stale-legacy keys (this app's own
+// data from a prior version), on the reasoning that it's still this app's
+// responsibility to manage. Independent audit correctly identified that this
+// reintroduces the same class of false-halt risk the whole patch exists to
+// fix: old v43.6-v43.9 leftover keys could still block THIS run's OWN
+// current collection even though they hold no data this build ever reads.
+// Renamed from estimateDashboardOwnedBytes() to make the narrower scope
+// explicit rather than implied by a comment.
+function estimateDashboardCurrentBytes() {
+  let total = 0;
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    const cls = classifyStorageKey(key);
+    if (cls !== "dashboard-current") continue;
+    const val = localStorage.getItem(key);
+    if (val) total += (key.length + val.length) * 2;
+  }
+  return total;
+}
+// Per-key breakdown for the new diagnostic report table — bytes and
+// classification for every key on the origin, so the source of any
+// unexplained growth is visible rather than inferred.
+function storageKeyBreakdown() {
+  const rows = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    const val = localStorage.getItem(key);
+    const bytes = val ? (key.length + val.length) * 2 : 0;
+    rows.push({ key, bytes, classification: classifyStorageKey(key) });
+  }
+  rows.sort((a, b) => b.bytes - a.bytes);
+  return rows;
+}
 function estimateLocalStorageBytes() {
   let total = 0;
   for (let i = 0; i < localStorage.length; i++) {
@@ -748,8 +833,15 @@ function estimateLocalStorageBytes() {
 // the authoritative persistence-degraded fail-stop.
 const RESEARCH_STORAGE_SOFT_CEILING_BYTES = Math.floor(3.5 * 1024 * 1024);
 function projectedStorageBytesWithEngine() {
+  // v43.10-r2 fix: this now measures DASHBOARD-OWNED bytes only, not the
+  // whole browser origin. Same subtract-old/add-projected-new logic as
+  // before — only the base measurement changed. See STORAGE_ACCOUNTING_REVISION
+  // above for why: origin-wide storage previously caused a false halt when
+  // unrelated same-origin data (another app, or this app's own stale keys
+  // from a prior version) pushed the origin total over the ceiling despite
+  // this app's own data being far below it.
   let current = 0;
-  try { current = estimateLocalStorageBytes(); } catch (_) { return Infinity; }
+  try { current = estimateDashboardCurrentBytes(); } catch (_) { return Infinity; }
   let oldEngine = "";
   try { oldEngine = localStorage.getItem(LS_ENGINE) || ""; } catch (_) { return Infinity; }
   let projected = "";
@@ -4657,7 +4749,7 @@ function generateReport() {
   out += `Exit diagnostics: ${rx.length} transition/event rows | legacy two-refresh would-close events ${legacyWouldClose} | same-forming-candle legacy confirmations ${hReg ? (hReg.legacySameCandleExitConfirmations || 0) : 0} | actual stable closed-candle exits ${actualStableExits}\n`;
   const teleClean = hReg && !(hReg.regimeTelemetryErrors || hReg.regimeDiagnosticMismatchCount);
   out += `Regime telemetry integrity: ${teleClean ? "CLEAN" : "INCOMPLETE / CHECK ERRORS"} | errors ${hReg ? (hReg.regimeTelemetryErrors || 0) : 0} | reconstruction mismatches ${hReg ? (hReg.regimeDiagnosticMismatchCount || 0) : 0}\n`;
-  try { out += `Current browser localStorage estimate: ${(estimateLocalStorageBytes()/1024/1024).toFixed(2)} MB | research soft ceiling ${(RESEARCH_STORAGE_SOFT_CEILING_BYTES/1024/1024).toFixed(2)} MB\n`; } catch (_) {}
+  try { out += `Current dashboard-owned localStorage estimate: ${(estimateDashboardCurrentBytes()/1024/1024).toFixed(2)} MB | research soft ceiling ${(RESEARCH_STORAGE_SOFT_CEILING_BYTES/1024/1024).toFixed(2)} MB (this is what the ceiling/halt is based on as of v43.10-r2 — dashboard-current keys only, NOT stale legacy — see full storage section below for the whole-origin figure and per-key breakdown)\n`; } catch (_) {}
 
   out += `\n=== TRADE / REGIME LINKAGE (regime-integrity-era telemetry window only) ===\n`;
   const linkTrades = (engine.allTradesEver || []).filter(t => Number.isFinite(t.openedAt));
@@ -5060,10 +5152,16 @@ function generateReport() {
   out += `\n=== V43.10 STORAGE COMPONENT ESTIMATE ===\n`;
   const mainShadowRows=shadowTrades.filter(st=>!st.pairedResearchOnly),researchShadowRows=shadowTrades.filter(st=>st.pairedResearchOnly);
   [["Regime telemetry",engine.regimeTelemetry],["Regime-exit telemetry",engine.regimeExitTelemetry],["Real-trade ledger",engine.allTradesEver],["Main shadow detail",mainShadowRows],["Research-only target companions",researchShadowRows],["Continuation shadows",continuationShadows],["Veto detail",vetoLog],["Target-cap cumulative registry",engine.targetCapEventRegistry],["Shadow dedup stats",engine.shadowDedupStats],["Engine events",engineEvents]].forEach(([label,obj])=>{const b=approxJsonBytes(obj);out += `${label}: ${b==null?"n/a":(b/1024).toFixed(1)+" KB"}\n`;});
-  try{const totalB=estimateLocalStorageBytes(),remain=Math.max(0,RESEARCH_STORAGE_SOFT_CEILING_BYTES-totalB),elapsedH=Math.max(.01,(Date.now()-(engine.startedAt||Date.now()))/3600000),rate=totalB/elapsedH;out += `Browser total ${(totalB/1024/1024).toFixed(2)} MB | policy ceiling ${(RESEARCH_STORAGE_SOFT_CEILING_BYTES/1024/1024).toFixed(2)} MB | headroom ${(remain/1024/1024).toFixed(2)} MB | naive runway ${rate>0?(remain/rate).toFixed(1)+"h":"n/a"} at average bytes/hour since start (conservative; includes baseline).\n`;
-    // v43.10: recent growth rate, distinct from the lifetime average above —
-    // catches a rate that only became unsustainable recently, which a
-    // since-start average dilutes and can hide.
+  // v43.10-r2 (corrected post-audit): the ceiling/halt decision
+  // (projectedStorageBytesWithEngine) now uses dashboard-CURRENT bytes only
+  // — not dashboard-stale-legacy — so old v43.6-v43.9 leftover keys can no
+  // longer block this run's own current collection. This line reports that
+  // same corrected basis, not the whole browser origin.
+  try{
+    const currentB=estimateDashboardCurrentBytes(),originB=estimateLocalStorageBytes();
+    const remain=Math.max(0,RESEARCH_STORAGE_SOFT_CEILING_BYTES-currentB),elapsedH=Math.max(.01,(Date.now()-(engine.startedAt||Date.now()))/3600000),rate=currentB/elapsedH;
+    out += `Dashboard-current storage (drives the 3.50MB ceiling and shadow-sampling halt — active keys only, excludes stale legacy): ${(currentB/1024/1024).toFixed(2)} MB | ceiling ${(RESEARCH_STORAGE_SOFT_CEILING_BYTES/1024/1024).toFixed(2)} MB | headroom ${(remain/1024/1024).toFixed(2)} MB | naive runway ${rate>0?(remain/rate).toFixed(1)+"h":"n/a"} at average bytes/hour since start.\n`;
+    out += `Whole-origin storage (environmental diagnostic only — does NOT drive the halt: other same-origin apps' data (e.g. Research Lab) and this app's own stale legacy keys genuinely do not affect collection as of this correction): ${(originB/1024/1024).toFixed(2)} MB${originB>currentB?` (${((originB-currentB)/1024/1024).toFixed(2)} MB of this is outside dashboard-current keys — see per-key table below for exactly what)`:""}\n`;
     const gs = storageGrowthStats(engine);
     if (gs) {
       const recentRunwayH = gs.bytesPerHour > 0 ? remain / gs.bytesPerHour : null;
@@ -5072,6 +5170,21 @@ function generateReport() {
       out += `Recent growth: not enough hourly snapshots yet (need 2+, one per hour) — will appear after the run has been active a couple of hours.\n`;
     }
   }catch(_){}
+
+  out += `\n=== V43.10-r2 STORAGE OWNERSHIP DIAGNOSTIC (per-key breakdown) ===\n`;
+  out += `${STORAGE_ACCOUNTING_REVISION}\n`;
+  try {
+    const rows = storageKeyBreakdown();
+    const byClass = {};
+    rows.forEach(r => { if (!byClass[r.classification]) byClass[r.classification] = { n: 0, bytes: 0 }; byClass[r.classification].n++; byClass[r.classification].bytes += r.bytes; });
+    out += `By classification: ` + Object.entries(byClass).map(([c, v]) => `${c}: ${v.n} key(s), ${(v.bytes/1024).toFixed(1)} KB`).join(" | ") + `\n`;
+    out += `Individual keys (largest first):\n`;
+    rows.forEach(r => { out += `  ${r.key}: ${(r.bytes/1024).toFixed(2)} KB [${r.classification}]\n`; });
+    if (byClass["dashboard-stale-legacy"] && byClass["dashboard-stale-legacy"].n > 0) {
+      out += `Note: dashboard-stale-legacy keys are identified here only — this patch does not delete them. Cleanup, if wanted, should be a separate deliberate action once you've reviewed what's listed above.\n`;
+    }
+  } catch (_) { out += `Per-key breakdown unavailable (localStorage enumeration failed).\n`; }
+
 
   out += `\n=== V43.10 INSTRUMENTATION COMPLETENESS ===\n`;
   const ih=engine.instrumentationHealth||{},installed=engine.instrumentationVersion===V439_INSTRUMENTATION_VERSION;
