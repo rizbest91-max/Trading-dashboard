@@ -152,7 +152,7 @@
     <div>
       <h1>Trading Monitor</h1>
       <div class="sub">Each strategy trades independently with its own $ per coin · live prices · no real money</div>
-      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v43.10 · 2026-09-14 (storage reliability + Resolve-Fold-Compact + diagnostic instrumentation)</div>
+      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v43.11 · 2026-09-18 (research reliability + cadence diagnostics + evidence compaction)</div>
     </div>
     <button id="refreshBtn">Refresh</button>
   </div>
@@ -338,7 +338,7 @@
   <div class="grid" id="cardGrid"></div>
 
   <div class="footnote" style="text-align:center;">
-    <span style="font-family:monospace; color:#4a5568; font-size:11px;">Build v43.10</span> · Full version history moved to the Excel research register — this footer no longer duplicates it.<br/>
+    <span style="font-family:monospace; color:#4a5568; font-size:11px;">Build v43.11</span> · Full version history moved to the Excel research register — this footer no longer duplicates it.<br/>
     Assumption recorded: £/$ treated as 1:1 since prices come from USDT pairs — no live FX conversion applied. Fees assumed at 0.1% per side, no funding cost modeled. Each strategy's pot per coin is fully isolated — a loss in one never affects another. Data saved only in this browser. Price/execution simulation uses Binance SPOT candles throughout; the funding-rate signal (used by Funding+Momentum and the scanner) is pulled from the separate PERPETUAL FUTURES market as a sentiment proxy only — no funding payments are simulated or applied to any P&L. Spot and futures prices can differ, so this is a proxy signal, not a futures execution model.
   </div>
 </div>
@@ -348,10 +348,23 @@
 // can actually work on them). More coins = more signals = a usable sample size
 // sooner. The exposure cap keeps total risk in check, so a wider list gives the
 // system more to choose from rather than more to pile into.
-const BUILD_TAG = "v43.10 · 2026-09-14 (storage reliability + Resolve-Fold-Compact + diagnostic instrumentation)";
-const BUILD_PARENT_SHA256 = "a2fdc9815a578c6fff6b79c9b7cdc31409c44383e92452b385a999d2ef59a7fe";
-const BUILD_PARENT_MD5 = "aec9d15767fb287328535bc8db414a19";
-const V439_INSTRUMENTATION_VERSION = "v43.10-r1"; // variable name kept for minimal diff churn; value bumped so a genuine v43.10 run reports its own version, and an older v43.9 save loaded into this file correctly shows MISMATCH / OLD RUN instead of a false INSTALLED
+const BUILD_TAG = "v43.11 · 2026-09-18 (research reliability + cadence diagnostics + evidence compaction)";
+const BUILD_PARENT_SHA256 = "85d30dc637835a0fe5b805b0ad973d4f0d0224cc16b6b6db6ba4940d8ca1e69d";
+const BUILD_PARENT_MD5 = "bf9aa0396eb61aa194e48923015da551";
+const V439_INSTRUMENTATION_VERSION = "v43.11-r1"; // variable name kept for minimal diff churn; value bumped so a genuine v43.11 run reports its own version and older saves report MISMATCH / OLD RUN
+const V4311_CHANGE_LOG = [
+  ["P0", "Resolved-shadow compaction hardening", "IMPLEMENTED", "Extend storage runway without dropping unresolved evidence", "Lower ongoing resolved-detail growth", "Runtime runway improvement requires a fresh v43.11 run", "PENDING RUNTIME", "CODE-VERIFIED"],
+  ["P0", "Cadence gap root-cause telemetry", "IMPLEMENTED", "Replace Safari/background-throttling guesses with incident evidence", "Classify delayed cycles by visibility/focus/network/prior refresh", "Runtime cause requires a fresh overnight run", "PENDING RUNTIME", "CODE-VERIFIED"],
+  ["P1", "Regime raw-vs-confirmed semantics audit", "RESOLVED/EXPLAINED", "Explain confirmed-change counts that can exceed raw changes", "Reconstruct transition semantics and surface component counts", "Source shows raw change -> confirmed mixed -> confirmed new state can create two confirmed transitions", "PASS", "SOURCE-VERIFIED"],
+  ["P1", "Veto attribution research", "IMPLEMENTED/PARTIAL BY DESIGN", "Avoid treating multi-veto candidates as clean evidence against each filter", "Persist resolved outcomes by known sole/multi/unknown attribution", "Only parallel related-check groups can be honestly classified sole/multi; later short-circuited gates remain unknown", "INCONCLUSIVE UNTIL DATA", "CODE-VERIFIED"],
+  ["P1", "Bollinger unique-episode funnel", "IMPLEMENTED", "Distinguish repeated 30s evaluations from independent signal episodes", "Expose stage-by-stage unique episode progression", "Runtime funnel evidence requires a fresh v43.11 run", "PENDING RUNTIME", "CODE-VERIFIED"],
+  ["P1", "De-correlated research score", "IMPLEMENTED RESEARCH-ONLY", "Test whether correlated trend checks are double-counted", "Compare alternate composite-trend score with the unchanged live score", "No live score/gating change; outcome comparison requires new decided trades", "PENDING SAMPLE", "CODE-VERIFIED"],
+  ["P1", "Donchian market-wave detail", "IMPLEMENTED RESEARCH-ONLY", "Test continuation-vs-first-breakout hypothesis", "Report 0/1-2/3+ recent same-direction entries with regime/ROC/ATR/volume/MFE/MAE", "Existing trade ledger can report historical rows; confidence still needs larger sample", "INCONCLUSIVE", "EARLY DATA"],
+  ["P1", "Duplicate thesis vs broad market wave", "CLARIFIED/SEPARATED", "Prevent same-coin duplication from being confused with cross-coin confirmation", "Report the two concepts separately", "Report labels/interpretation separated; no exposure rule changed", "PASS", "REPORT-VERIFIED"],
+  ["SMALL", "R:R display precision", "IMPLEMENTED", "Prevent valid near-floor values being visually rounded to exactly 0.8", "Show two decimals in full trade log", "Display changed only; trading calculation unchanged", "PASS", "CODE-VERIFIED"],
+  ["AUDIT", "Post-target-cap validation order", "PASS", "Confirm capped targets are revalidated using final economics", "Cap -> direction -> final target distance -> 0.80R -> min profit -> reachability", "Source order confirmed exactly; no defect found", "PASS", "SOURCE-VERIFIED"],
+  ["SETTINGS", "Fresh benchmark defaults", "IMPLEMENTED", "Make fresh load/Reset reproducible without manual toggles", "24 coins + benchmark lock ON + auto-add OFF", "Defaults and Reset path installed; runtime UI verification still recommended", "PENDING UI CHECK", "CODE-VERIFIED"],
+];
 
 const DEFAULT_COINS = [
   "BTC", "ETH", "SOL", "BNB", "ADA", "XRP", "DOGE", "AVAX",
@@ -517,6 +530,34 @@ function finalizeShadowResolution(st, engine) {
         ts.hypNetSum += st.hypotheticalPnl;
         ts.hypNetCount++;
       }
+
+      // v43.11: cumulative attribution survives raw-detail compaction. Only
+      // the SMA/MACD trio currently has a known parallel-check sole/multi
+      // classification; other vetoes remain honestly labelled as pipeline-
+      // first/global-unknown rather than pretending later gates were tested.
+      if (!engine.vetoAttributionOutcomeStats) engine.vetoAttributionOutcomeStats = {};
+      const attr = st.vetoAttribution || "pipeline_first_global_unknown";
+      const ak = `${st.vetoType}|${attr}`;
+      if (!engine.vetoAttributionOutcomeStats[ak]) engine.vetoAttributionOutcomeStats[ak] = { vetoType: st.vetoType, attribution: attr, n: 0, wins: 0, losses: 0, timeouts: 0, ambiguous: 0, hypNetSum: 0, hypNetCount: 0 };
+      const as = engine.vetoAttributionOutcomeStats[ak];
+      as.n++;
+      if (st.resolution === "would_win") as.wins++;
+      else if (st.resolution === "would_lose") as.losses++;
+      else if (st.resolution === "ambiguous") as.ambiguous++;
+      else as.timeouts++;
+      if (st.hypotheticalPnl !== undefined && st.resolution !== "ambiguous") { as.hypNetSum += st.hypotheticalPnl; as.hypNetCount++; }
+
+      if (!engine.vetoRegimeOutcomeStats) engine.vetoRegimeOutcomeStats = {};
+      const regimeBucket = st.vetoRegimeBucket || "unknown";
+      const rk = `${st.vetoType}|${regimeBucket}`;
+      if (!engine.vetoRegimeOutcomeStats[rk]) engine.vetoRegimeOutcomeStats[rk] = { vetoType: st.vetoType, regimeBucket, n: 0, wins: 0, losses: 0, timeouts: 0, ambiguous: 0, hypNetSum: 0, hypNetCount: 0 };
+      const rs = engine.vetoRegimeOutcomeStats[rk];
+      rs.n++;
+      if (st.resolution === "would_win") rs.wins++;
+      else if (st.resolution === "would_lose") rs.losses++;
+      else if (st.resolution === "ambiguous") rs.ambiguous++;
+      else rs.timeouts++;
+      if (st.hypotheticalPnl !== undefined && st.resolution !== "ambiguous") { rs.hypNetSum += st.hypotheticalPnl; rs.hypNetCount++; }
     }
   }
 }
@@ -565,6 +606,13 @@ function safeJSONRead(key, fallback, critical = false) {
 let coinList = safeJSONRead(LS_COINS, null, false) || DEFAULT_COINS.slice();
 let toggles = safeJSONRead(LS_TOGGLES, null, false) || { ...DEFAULT_TOGGLES };
 let engine = safeJSONRead(LS_ENGINE, null, true);
+// v43.11 settings default: when there is NO active saved run, start from the
+// fixed 24-coin benchmark cohort rather than inheriting a previous scanner/
+// exploratory universe. An active run still restores its exact saved universe.
+if (!engine) {
+  coinList = DEFAULT_COINS.slice();
+  toggles = { ...DEFAULT_TOGGLES };
+}
 // P0-3 fix: refresh() is async and can be mid-flight (awaiting 1-minute
 // resolver calls, coin fetches) when the user clicks Start/Restart/Reset —
 // only the Refresh button was disabled during a cycle, not Start/Reset/
@@ -756,7 +804,7 @@ function saveToggles() { safeLocalStorageSet(LS_TOGGLES, JSON.stringify(toggles)
 // deliberately left unchanged so a page reload mid-run does not trigger a
 // build-mismatch against an already-started v43.10 session. Track this
 // patch's own identity separately:
-const STORAGE_ACCOUNTING_REVISION = "v43.10-r2 (dashboard-current vs whole-origin storage split; stale-legacy keys visible but excluded from the ceiling after independent audit correction)";
+const STORAGE_ACCOUNTING_REVISION = "v43.11 (dashboard-owned storage + resolved-evidence compaction hardening)";
 const DASHBOARD_KEY_PREFIX = "tm2_";
 // Every key this exact build actively reads/writes. Any OTHER tm2_-prefixed
 // key found in localStorage is still this app's own data (a prior version
@@ -783,22 +831,14 @@ function classifyStorageKey(key) {
   }
   return "unknown/other";
 }
-// v43.10-r2 correction (post-audit): counts dashboard-current keys ONLY —
-// this is what the 3.50MB ceiling and the shadow-sampling halt are based on.
-// Originally this also counted dashboard-stale-legacy keys (this app's own
-// data from a prior version), on the reasoning that it's still this app's
-// responsibility to manage. Independent audit correctly identified that this
-// reintroduces the same class of false-halt risk the whole patch exists to
-// fix: old v43.6-v43.9 leftover keys could still block THIS run's OWN
-// current collection even though they hold no data this build ever reads.
-// Renamed from estimateDashboardOwnedBytes() to make the narrower scope
-// explicit rather than implied by a comment.
-function estimateDashboardCurrentBytes() {
+// Dashboard-owned bytes ONLY — this is what the 3.50MB ceiling and the
+// shadow-sampling halt are now based on, not the whole origin.
+function estimateDashboardOwnedBytes() {
   let total = 0;
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
     const cls = classifyStorageKey(key);
-    if (cls !== "dashboard-current") continue;
+    if (cls !== "dashboard-current" && cls !== "dashboard-stale-legacy") continue;
     const val = localStorage.getItem(key);
     if (val) total += (key.length + val.length) * 2;
   }
@@ -841,7 +881,7 @@ function projectedStorageBytesWithEngine() {
   // from a prior version) pushed the origin total over the ceiling despite
   // this app's own data being far below it.
   let current = 0;
-  try { current = estimateDashboardCurrentBytes(); } catch (_) { return Infinity; }
+  try { current = estimateDashboardOwnedBytes(); } catch (_) { return Infinity; }
   let oldEngine = "";
   try { oldEngine = localStorage.getItem(LS_ENGINE) || ""; } catch (_) { return Infinity; }
   let projected = "";
@@ -1077,6 +1117,11 @@ function ensureApiHealth() {
     shadowSkippedByType: {}, shadowSkippedByBot: {}, shadowSkippedByCoin: {},
     continuationExcludedAmbiguousSource: 0, timeoutApproxPriceCount: 0,
     lastCycleStartedAt: null, cadenceGapCount: 0, cadenceGapTotalMs: 0, cadenceGapMaxMs: 0, missedTickEstimate: 0,
+    // v43.11: root-cause context for cadence gaps. Only GAP incidents are
+    // retained (bounded), not every normal 30s cycle, so the diagnostic cost
+    // stays small while still distinguishing hidden/background/offline/long-
+    // resume patterns from ordinary API latency.
+    cadenceGapDiagnostics: [], cadenceGapByVisibility: {}, cadenceGapByFocus: {}, cadenceGapByOnline: {},
   };
   if (!engine.apiHealth) {
     // v41.1 fix: cyclesCompleted only ever meant "the refresh function ran
@@ -1868,6 +1913,17 @@ function resetEngine() {
   }
   engine = null;
   engineGeneration++;
+  // v43.11: Reset is a true clean-benchmark reset, not merely a trade-ledger
+  // reset. Restore the canonical 24-coin cohort + all strategies ON. The user
+  // can still switch to exploratory/auto-add mode manually after Reset.
+  coinList = DEFAULT_COINS.slice();
+  toggles = { ...DEFAULT_TOGGLES };
+  saveCoins(); saveToggles();
+  if (typeof autoAdded !== "undefined") { autoAdded = {}; saveAutoAdded(); }
+  const resetAutoTrack = document.getElementById("autoTrackOn");
+  const resetBenchmarkLock = document.getElementById("benchmarkLockOn");
+  if (resetAutoTrack) resetAutoTrack.checked = false;
+  if (resetBenchmarkLock) resetBenchmarkLock.checked = true;
   persistenceDegraded = false; persistenceDegradedSince = null;
   vetoLog = []; shadowTrades = []; continuationShadows = []; engineEvents = []; ambiguousCandleCount = 0;
   try {
@@ -1877,6 +1933,8 @@ function resetEngine() {
   startupIntegrityWarnings = [];
   startupIntegrityBlocked = false;
   clearRunRuntimeState();
+  renderToggles();
+  renderChips();
   renderEngine();
 }
 function ensureCoinInEngine(coin) {
@@ -1903,6 +1961,69 @@ function bumpBollFunnel(stage, side, passed) {
   const key = passed ? "pass" : "fail";
   f[stage][key]++;
   if (side === "Long" || side === "Short") f[stage].bySide[side][key]++;
+}
+
+// v43.11: unique Bollinger signal-episode research. Raw 30s evaluations are
+// still retained above, but this second layer counts one continuous band-signal
+// episode only once and tracks how far that episode ever progressed through the
+// funnel. This prevents thousands of repeated refresh evaluations from being
+// mistaken for thousands of independent setups.
+function ensureBollingerEpisodeResearch() {
+  if (!engine) return null;
+  if (!engine.bollingerEpisodeResearch || typeof engine.bollingerEpisodeResearch !== "object") {
+    engine.bollingerEpisodeResearch = { nextId: 1, active: {}, totals: { uniqueEpisodes: 0, endedEpisodes: 0, acceptedEpisodes: 0, terminalStage: {}, stageReach: {}, stagePass: {} } };
+  }
+  const r = engine.bollingerEpisodeResearch;
+  if (!r.active || typeof r.active !== "object") r.active = {};
+  if (!r.totals || typeof r.totals !== "object") r.totals = { uniqueEpisodes: 0, endedEpisodes: 0, acceptedEpisodes: 0, terminalStage: {}, stageReach: {}, stagePass: {} };
+  if (!r.totals.terminalStage) r.totals.terminalStage = {};
+  if (!r.totals.stageReach) r.totals.stageReach = {};
+  if (!r.totals.stagePass) r.totals.stagePass = {};
+  return r;
+}
+function bollEpisodeKey(coin, side) { return `${coin}|${side}`; }
+function finalizeBollingerEpisodeKey(key, fallbackStage = "signal_ended") {
+  const r = ensureBollingerEpisodeResearch();
+  if (!r || !r.active[key]) return;
+  const ep = r.active[key];
+  const terminal = ep.accepted ? "accepted" : (ep.lastFailureStage || fallbackStage);
+  r.totals.endedEpisodes = (r.totals.endedEpisodes || 0) + 1;
+  r.totals.terminalStage[terminal] = (r.totals.terminalStage[terminal] || 0) + 1;
+  delete r.active[key];
+}
+function updateBollingerSignalEpisode(coin, side) {
+  const r = ensureBollingerEpisodeResearch();
+  if (!r) return;
+  ["Long", "Short"].forEach(s => {
+    const key = bollEpisodeKey(coin, s);
+    if (s !== side && r.active[key]) finalizeBollingerEpisodeKey(key, "signal_ended");
+  });
+  if (side !== "Long" && side !== "Short") return;
+  const key = bollEpisodeKey(coin, side);
+  if (!r.active[key]) {
+    const id = r.nextId || 1; r.nextId = id + 1;
+    r.active[key] = { id, coin, side, startedAt: Date.now(), reached: {}, passed: {}, lastFailureStage: null, accepted: false };
+    r.totals.uniqueEpisodes = (r.totals.uniqueEpisodes || 0) + 1;
+  }
+}
+function markBollingerEpisodeStage(coin, side, stage, passed) {
+  const r = ensureBollingerEpisodeResearch();
+  if (!r) return;
+  const ep = r.active[bollEpisodeKey(coin, side)];
+  if (!ep) return;
+  if (!ep.reached[stage]) { ep.reached[stage] = true; r.totals.stageReach[stage] = (r.totals.stageReach[stage] || 0) + 1; }
+  if (passed && !ep.passed[stage]) { ep.passed[stage] = true; r.totals.stagePass[stage] = (r.totals.stagePass[stage] || 0) + 1; }
+  if (!passed) ep.lastFailureStage = stage;
+}
+function acceptBollingerEpisode(coin, side) {
+  const r = ensureBollingerEpisodeResearch();
+  if (!r) return;
+  const key = bollEpisodeKey(coin, side), ep = r.active[key];
+  if (!ep) return;
+  markBollingerEpisodeStage(coin, side, "accepted", true);
+  ep.accepted = true;
+  r.totals.acceptedEpisodes = (r.totals.acceptedEpisodes || 0) + 1;
+  finalizeBollingerEpisodeKey(key, "accepted");
 }
 
 function botSignal(botKey, ind) {
@@ -2112,19 +2233,28 @@ async function runEngineStep() {
   //   4. Volume consistent with a real reversal (not a quiet drift to an extreme)
   // A 5th requirement (multi-check persistence) is applied where this is used.
   function checkMeanReversionPermission(s, side) {
+    // v43.11 returns the SAME permission decision/reason as before, plus a
+    // research-only step map so Bollinger's combined rejection can be split
+    // into range/exhaustion/structure/permission-volume stages without
+    // changing any threshold or entry behavior.
+    const checks = {};
     if (s.sma96 && s.sma192 && s.price) {
       const spread = Math.abs(s.sma96 - s.sma192) / s.price;
-      if (spread >= 0.02) return { allowed: false, reason: "Not a confirmed range — slow trend averages are diverging strongly (established trend, not a range)" };
-    }
+      checks.range = spread < 0.02;
+      if (!checks.range) return { allowed: false, failedStage: "permission_range", checks, reason: "Not a confirmed range — slow trend averages are diverging strongly (established trend, not a range)" };
+    } else checks.range = true;
     const hist = s.indicators.macd.hist, histPrev = s.indicators.macd.histPrev;
-    if (hist === null || histPrev === null) return { allowed: false, reason: "Insufficient MACD history to confirm exhaustion" };
+    if (hist === null || histPrev === null) { checks.exhaustion = false; return { allowed: false, failedStage: "permission_exhaustion", checks, reason: "Insufficient MACD history to confirm exhaustion" }; }
     const exhaustion = side === "Long" ? (hist > histPrev) : (hist < histPrev);
-    if (!exhaustion) return { allowed: false, reason: "No sign of exhaustion — momentum in the recent direction hasn't started fading yet" };
-    if (s.positionInRange === undefined) return { allowed: false, reason: "No range-position data available" };
+    checks.exhaustion = exhaustion;
+    if (!exhaustion) return { allowed: false, failedStage: "permission_exhaustion", checks, reason: "No sign of exhaustion — momentum in the recent direction hasn't started fading yet" };
+    if (s.positionInRange === undefined) { checks.structure = false; return { allowed: false, failedStage: "permission_structure", checks, reason: "No range-position data available" }; }
     const nearStructure = side === "Long" ? s.positionInRange < 0.15 : s.positionInRange > 0.85;
-    if (!nearStructure) return { allowed: false, reason: `Not close enough to real support/resistance (at ${(s.positionInRange*100).toFixed(0)}% of its range)` };
-    if (s.volRatio === undefined || s.volRatio === null || s.volRatio < 1.0) return { allowed: false, reason: `Volume too thin for a credible reversal (${s.volRatio != null ? s.volRatio.toFixed(2) : "?"}x average)` };
-    return { allowed: true, reason: "Range state, exhaustion, structural proximity, and volume all support a genuine reversal setup" };
+    checks.structure = nearStructure;
+    if (!nearStructure) return { allowed: false, failedStage: "permission_structure", checks, reason: `Not close enough to real support/resistance (at ${(s.positionInRange*100).toFixed(0)}% of its range)` };
+    checks.permissionVolume = !(s.volRatio === undefined || s.volRatio === null || s.volRatio < 1.0);
+    if (!checks.permissionVolume) return { allowed: false, failedStage: "permission_volume", checks, reason: `Volume too thin for a credible reversal (${s.volRatio != null ? s.volRatio.toFixed(2) : "?"}x average)` };
+    return { allowed: true, failedStage: null, checks, reason: "Range state, exhaustion, structural proximity, and volume all support a genuine reversal setup" };
   }
 
   // BTC regime kept only for the dashboard summary box (informational; each coin is gated by its own regime) — actual
@@ -2649,9 +2779,10 @@ async function runEngineStep() {
         let side = null;
         if (sig === "bull") side = "Long";
         else if (sig === "bear" && engine.allowShorts) side = "Short";
+        if (bot.key === "boll") updateBollingerSignalEpisode(coin, side);
         if (!side) return;
-        // v43.10 addition #16: raw signal opportunity counter (diagnostic only)
-        if (bot.key === "boll") bumpBollFunnel("rawSignalOpportunity", side, true);
+        // v43.10 raw evaluation + v43.11 unique episode tracking.
+        if (bot.key === "boll") { bumpBollFunnel("rawSignalOpportunity", side, true); markBollingerEpisodeStage(coin, side, "raw_signal", true); }
 
         // v30 shadow tracking: compute the hypothetical trade plan UP FRONT,
         // before any veto check runs, using the exact same formulas a real
@@ -2734,7 +2865,25 @@ async function runEngineStep() {
           // v43.6: the paired veto is prepared only INSIDE addShadowTrade,
           // after shadow-capacity prechecks, then veto detail/totals + shadow
           // arrays + shadowCreatedCount commit in ONE LS_ENGINE write.
-          const researchMeta = { decisionCycleId, originalTarget: hypOriginalTarget, cappedTarget: hypTarget, capApplied: hypCapApplied };
+          const vetoAttribution = reason.includes("[sole veto among this check group")
+            ? "known_sole_related_group"
+            : reason.includes("[NOT sole veto")
+              ? "known_multi_related_group"
+              : "pipeline_first_global_unknown";
+          const vetoClosed = coinRegimeClosedComponents(s);
+          const vetoStableRegime = stableRegimeByCoin[coin] || "mixed";
+          const vetoRoc = vetoClosed && Number.isFinite(vetoClosed.roc) ? vetoClosed.roc : null;
+          const vetoRegimeBucket = vetoStableRegime === "bull"
+            ? (vetoRoc !== null && vetoRoc >= 1.5 ? "strong_bull" : "weak_bull")
+            : vetoStableRegime === "bear"
+              ? (vetoRoc !== null && vetoRoc <= -1.5 ? "strong_bear" : "weak_bear")
+              : "mixed";
+          const researchMeta = {
+            decisionCycleId, originalTarget: hypOriginalTarget, cappedTarget: hypTarget, capApplied: hypCapApplied, vetoAttribution,
+            vetoRegimeBucket, vetoStableRegime, vetoClosedRocPct: vetoRoc,
+            vetoAtrPct: Number.isFinite(s.atrPct) ? s.atrPct : null,
+            vetoVolRatio: Number.isFinite(s.volRatio) ? s.volRatio : null,
+          };
           if (!addShadowTrade(bot.key, coin, side, hypEntry, hypStop, hypTarget, reason, vetoType, null, hypNotional, engine.feePct, undefined,
               { vetoType, bot: bot.key, coin, reason }, researchMeta)) {
             if (persistenceDegraded && engine) { const h = ensureApiHealth(); if (h) h.persistenceBlockedEntries = (h.persistenceBlockedEntries || 0) + 1; }
@@ -2848,9 +2997,13 @@ async function runEngineStep() {
         // v43.7 runs. A gap also resets the confirmation count instead of
         // incrementing across unseen candles.
         if (bot.key === "rsi" || bot.key === "boll") {
-          if (bot.key === "boll") bumpBollFunnel("reachedClosedMeanReversionEval", side, true); // v43.10 #16
+          if (bot.key === "boll") { bumpBollFunnel("reachedClosedMeanReversionEval", side, true); markBollingerEpisodeStage(coin, side, "closed_mean_reversion_eval", true); }
           const closedPermissionState = regimeIntegrityModeActive ? closedMeanReversionState(s) : s;
           const permission = checkMeanReversionPermission(closedPermissionState || s, side);
+          if (bot.key === "boll" && permission && permission.checks) {
+            const stageMap = [["range","permission_range"],["exhaustion","permission_exhaustion"],["structure","permission_structure"],["permissionVolume","permission_volume"]];
+            stageMap.forEach(([k,stage]) => { if (permission.checks[k] !== undefined) markBollingerEpisodeStage(coin, side, stage, !!permission.checks[k]); });
+          }
           const confirmKey = `${bot.key}_${coin}_${side}`;
           if (!engine.reversalConfirm) engine.reversalConfirm = {};
           const lastClosedCandleTime = (s.times && s.times.length >= 2) ? s.times[s.times.length - 2] : null;
@@ -2875,11 +3028,19 @@ async function runEngineStep() {
           // Same closed candle: do not inflate. Fresh v43.7 uses permission
           // computed from that closed candle too, so count and evidence align.
           if (engine.reversalConfirm[confirmKey].count < 2) {
-            if (bot.key === "boll") bumpBollFunnel("reversalCondition", side, false); // v43.10 #16 — folded in with the permission check above, same veto type
+            if (bot.key === "boll") {
+              bumpBollFunnel("reversalCondition", side, false);
+              markBollingerEpisodeStage(coin, side, "confirmation_first_closed", engine.reversalConfirm[confirmKey].count >= 1);
+              markBollingerEpisodeStage(coin, side, "confirmation_second_closed", false);
+            }
             blockCandidate("reversal_unconfirmed", "Reversal setup looks valid — needs two consecutive fully-closed candles before entering");
             return;
           }
-          if (bot.key === "boll") bumpBollFunnel("reversalCondition", side, true); // v43.10 #16
+          if (bot.key === "boll") {
+            bumpBollFunnel("reversalCondition", side, true);
+            markBollingerEpisodeStage(coin, side, "confirmation_first_closed", true);
+            markBollingerEpisodeStage(coin, side, "confirmation_second_closed", true);
+          }
         }
 
 
@@ -2888,11 +3049,11 @@ async function runEngineStep() {
         // than as its own bot.
         if (engine.useVolumeFilter && s.volRatio !== null && s.volRatio !== undefined) {
           if (s.volRatio < 0.8) {
-            if (bot.key === "boll") bumpBollFunnel("volumeCondition", side, false); // v43.10 #16
+            if (bot.key === "boll") { bumpBollFunnel("volumeCondition", side, false); markBollingerEpisodeStage(coin, side, "global_volume", false); } // v43.11
             blockCandidate("thin_volume", `Vetoed: volume ${s.volRatio.toFixed(2)}x average, too thin to confirm the move`); return;
           }
         }
-        if (bot.key === "boll") bumpBollFunnel("volumeCondition", side, true); // v43.10 #16
+        if (bot.key === "boll") { bumpBollFunnel("volumeCondition", side, true); markBollingerEpisodeStage(coin, side, "global_volume", true); } // v43.11
 
         // Correlation / exposure cap: crypto moves together, so 30 longs across
         // 15 coins is really one big bet, not 30 diversified ones. Limit how many
@@ -2927,11 +3088,11 @@ async function runEngineStep() {
           const fightingStrongUp = side === "Short" && coinReg === "bull" && roc !== null && roc >= 2.5;
           const fightingStrongDown = side === "Long" && coinReg === "bear" && roc !== null && roc <= -2.5;
           if (fightingStrongUp || fightingStrongDown) {
-            if (bot.key === "boll") bumpBollFunnel("regimeCondition", side, false); // v43.10 #16 — RSI/Boll's closest regime-based gate, since they're exempt from regime_gate itself
+            if (bot.key === "boll") { bumpBollFunnel("regimeCondition", side, false); markBollingerEpisodeStage(coin, side, "severe_contradiction", false); } // v43.11
             blockCandidate("severe_contradiction", `${side} vetoed: regime is ${coinReg} AND price still accelerating (${roc.toFixed(1)}% 1h) the same direction — fighting the move, not catching exhaustion`);
             return;
           }
-          if (bot.key === "boll") bumpBollFunnel("regimeCondition", side, true); // v43.10 #16
+          if (bot.key === "boll") { bumpBollFunnel("regimeCondition", side, true); markBollingerEpisodeStage(coin, side, "severe_contradiction", true); } // v43.11
         }
 
 
@@ -2989,7 +3150,7 @@ async function runEngineStep() {
         if (!stop || stop === entry) return;
         const stopDistPct = Math.abs(entry - stop) / entry;
         if (stopDistPct < 0.012) {
-          if (bot.key === "boll") bumpBollFunnel("economicsCondition", side, false); // v43.10 #16
+          if (bot.key === "boll") { bumpBollFunnel("economicsCondition", side, false); markBollingerEpisodeStage(coin, side, "economics", false); } // v43.11
           blockCandidate("stop_too_tight", `Vetoed: stop distance only ${(stopDistPct*100).toFixed(2)}% — too tight to be a meaningful risk boundary`); return;
         } // require at least ~1.2% room to the stop
 
@@ -3022,7 +3183,7 @@ async function runEngineStep() {
         // on the wrong side of entry (structure already exhausted) — this
         // is the case Math.abs() below would have silently missed.
         if (!validDirectionalPlan(side, entry, stop, target)) {
-          if (bot.key === "boll") bumpBollFunnel("economicsCondition", side, false); // v43.10 #16
+          if (bot.key === "boll") { bumpBollFunnel("economicsCondition", side, false); markBollingerEpisodeStage(coin, side, "economics", false); } // v43.11
           blockCandidate("structure_exhausted", `${side} vetoed: structural target capping left no valid target ahead of entry (price already past the relevant support/resistance level)`);
           return;
         }
@@ -3032,7 +3193,7 @@ async function runEngineStep() {
         if (actualTargetDistPct < stopDistPct * 0.8) {
           // Capping to real structure left too little reward to justify the
           // risk — reject rather than take a trade with poor real economics.
-          if (bot.key === "boll") bumpBollFunnel("economicsCondition", side, false); // v43.10 #16
+          if (bot.key === "boll") { bumpBollFunnel("economicsCondition", side, false); markBollingerEpisodeStage(coin, side, "economics", false); } // v43.11
           blockCandidate("target_capped", `After capping to real structure, reward (${(actualTargetDistPct*100).toFixed(2)}%) no longer justifies the risk (${(stopDistPct*100).toFixed(2)}%)`);
           return;
         }
@@ -3056,7 +3217,7 @@ async function runEngineStep() {
         const expectedNet = expectedGross - expectedFees;
         const minProfit = engine.minProfit !== undefined ? engine.minProfit : 15;
         if (expectedNet < minProfit) {
-          if (bot.key === "boll") bumpBollFunnel("economicsCondition", side, false); // v43.10 #16
+          if (bot.key === "boll") { bumpBollFunnel("economicsCondition", side, false); markBollingerEpisodeStage(coin, side, "economics", false); } // v43.11
           blockCandidate("below_min_profit", `Vetoed: expected profit $${expectedNet.toFixed(2)} is below the $${minProfit} minimum`); return;
         }
 
@@ -3066,7 +3227,7 @@ async function runEngineStep() {
         const tp3MovePct = actualTargetDistPct;
         const avgDailyRangePct = s.avgDailyRangePct;
         if (avgDailyRangePct && tp3MovePct > avgDailyRangePct * 1.2) {
-          if (bot.key === "boll") bumpBollFunnel("economicsCondition", side, false); // v43.10 #16
+          if (bot.key === "boll") { bumpBollFunnel("economicsCondition", side, false); markBollingerEpisodeStage(coin, side, "economics", false); } // v43.11
           blockCandidate("target_infeasible", `Target needs a ${(tp3MovePct*100).toFixed(1)}% move but ${coin} typically ranges ${(avgDailyRangePct*100).toFixed(1)}%/day (based on ${s.dailyRangeDaysUsed || "?"} day${s.dailyRangeDaysUsed === 1 ? "" : "s"} of data)`);
           return;
         }
@@ -3167,7 +3328,7 @@ async function runEngineStep() {
             if (a2 && a2.position && a2.position.side === side) sameDirNow++;
           });
           if (sameDirNow >= engine.maxSameDirection) {
-            if (bot.key === "boll") bumpBollFunnel("economicsCondition", side, false); // v43.10 #16 — final exposure re-check, grouped with economics as the last gate before opening
+            if (bot.key === "boll") { bumpBollFunnel("economicsCondition", side, false); markBollingerEpisodeStage(coin, side, "economics", false); } // v43.11 — final exposure re-check, grouped with economics as the last gate before opening
             blockCandidate("exposure_cap", `${side} vetoed at final check: another concurrent entry already reached the ${engine.maxSameDirection}-position exposure cap first`);
             return;
           }
@@ -3197,7 +3358,7 @@ async function runEngineStep() {
         // both the final "economicsCondition pass" and "finalAccepted"/trade-
         // opened moment, since nothing between here and acc.position being
         // set below can still fail the candidate.
-        if (bot.key === "boll") { bumpBollFunnel("economicsCondition", side, true); bumpBollFunnel("finalAccepted", side, true); }
+        if (bot.key === "boll") { bumpBollFunnel("economicsCondition", side, true); markBollingerEpisodeStage(coin, side, "economics", true); bumpBollFunnel("finalAccepted", side, true); acceptBollingerEpisode(coin, side); }
         // v43.8 measurement-only market-wave context: current legacy correlation only
         // notices same coin+direction across strategies. Count broader same-direction crypto
         // exposure and recent entries across ALL strategies/coins without changing allocation.
@@ -3370,9 +3531,16 @@ function pruneCountedShadowIds() {
 // compacting, so folding happens exactly once regardless of which path
 // resolved a given shadow — the sweep, not any single call site, is the
 // guarantee.
-const SHADOW_FORENSIC_WINDOW = 150; // most-recent resolved shadows kept in full detail per array; DELIBERATELY conservative vs the 100-200 range agreed, see registry
-const SHADOW_COMPANION_FORENSIC_WINDOW = 20; // v43.10 req #5: companions get a lighter lifecycle — their pairing result is already fully captured in engine.targetCapEventRegistry once resolved, so only a small spot-check window is kept, not the full forensic window
-const SHADOW_COMPACTED_STUB_CAP = 5000; // v43.10: without this, compacted stubs (small as they are) would still accumulate without limit over a multi-day run, making growth slower but never actually bounded. Beyond this many stubs per array, the OLDEST are dropped entirely — their scientific outcome is already permanently folded into shadowTotals/shadowTotalsByStrategy/targetCapEventRegistry, so this is not evidence loss (v43.10 req #12), just the final step of the same compaction the stub itself already represents.
+// v43.11 P0 storage-sustainability hardening. Resolved evidence is folded into
+// cumulative registries BEFORE detail compaction. The old 5,000-stub cap was
+// still large enough for resolved forensic detail to dominate localStorage in
+// a busy overnight run. Keep a useful forensic window, but bound old folded
+// identity stubs much more tightly so multi-day research has materially more
+// runway without discarding unresolved evidence.
+const SHADOW_FORENSIC_WINDOW = 80;
+const SHADOW_COMPANION_FORENSIC_WINDOW = 10;
+const SHADOW_COMPACTED_STUB_CAP = 750;
+const SHADOW_COMPANION_STUB_CAP = 100;
 function foldAnyUncountedShadows(engineRef) {
   if (!engineRef) return 0;
   let folded = 0;
@@ -3397,6 +3565,8 @@ function compactShadowRecord(st) {
     bot: st.bot, coin: st.coin, side: st.side, vetoType: st.vetoType,
     resolution: st.resolution, hypotheticalPnl: st.hypotheticalPnl !== undefined ? st.hypotheticalPnl : null,
     pairedResearchOnly: !!st.pairedResearchOnly, decisionCycleId: st.decisionCycleId || null,
+    vetoAttribution: st.vetoAttribution || null,
+    vetoRegimeBucket: st.vetoRegimeBucket || null,
     counted: true, compacted: true,
   };
 }
@@ -3405,43 +3575,44 @@ function compactShadowArray(arr) {
   const notYetFolded = arr.filter(st => st.status !== "pending" && st.counted !== true);
   const foldedMain = arr.filter(st => st.status !== "pending" && st.counted === true && !st.pairedResearchOnly);
   const foldedCompanion = arr.filter(st => st.status !== "pending" && st.counted === true && st.pairedResearchOnly);
-  function compactSubset(list, window) {
+  function compactSubset(list, window, stubCap) {
     list.sort((a, b) => (b.resolvedAt || b.t || 0) - (a.resolvedAt || a.t || 0));
     const keepFull = list.slice(0, window);
     const beyondWindow = list.slice(window);
     const alreadyCompacted = beyondWindow.filter(st => st.compacted === true);
     const toCompactNow = beyondWindow.filter(st => st.compacted !== true).map(compactShadowRecord);
-    // v43.10: hard cap on accumulated stubs — without this, growth is much
-    // slower than before compaction existed, but still technically unbounded
-    // over a multi-day run. Beyond the cap, the OLDEST stubs are dropped
-    // outright; their outcome is already durably folded into the cumulative
-    // aggregates, so this is the final step of the same compaction, not new
-    // evidence loss.
     const allStubs = alreadyCompacted.concat(toCompactNow).sort((a, b) => (b.resolvedAt || b.t || 0) - (a.resolvedAt || a.t || 0));
-    const keptStubs = allStubs.slice(0, SHADOW_COMPACTED_STUB_CAP);
-    return { kept: keepFull.concat(keptStubs), compactedNow: toCompactNow.length };
+    const keptStubs = allStubs.slice(0, stubCap);
+    const droppedStubs = Math.max(0, allStubs.length - keptStubs.length);
+    return { kept: keepFull.concat(keptStubs), compactedNow: toCompactNow.length, droppedStubs };
   }
-  const mainC = compactSubset(foldedMain, SHADOW_FORENSIC_WINDOW);
-  const compC = compactSubset(foldedCompanion, SHADOW_COMPANION_FORENSIC_WINDOW);
+  const mainC = compactSubset(foldedMain, SHADOW_FORENSIC_WINDOW, SHADOW_COMPACTED_STUB_CAP);
+  const compC = compactSubset(foldedCompanion, SHADOW_COMPANION_FORENSIC_WINDOW, SHADOW_COMPANION_STUB_CAP);
   return {
     array: pending.concat(notYetFolded, mainC.kept, compC.kept),
     compactedNow: mainC.compactedNow + compC.compactedNow,
+    droppedStubs: mainC.droppedStubs + compC.droppedStubs,
   };
 }
 function runShadowCompactionSweep(engineRef) {
-  if (!engineRef) return { folded: 0, compactedMain: 0, compactedCont: 0 };
+  if (!engineRef) return { folded: 0, compactedMain: 0, compactedCont: 0, droppedStubs: 0 };
   const folded = foldAnyUncountedShadows(engineRef);
   const mainResult = compactShadowArray(shadowTrades);
   const contResult = compactShadowArray(continuationShadows);
   shadowTrades = mainResult.array;
   continuationShadows = contResult.array;
+  const priorStats = engineRef.shadowCompactionStats || {};
   engineRef.shadowCompactionStats = {
     lastRunAt: Date.now(),
-    totalCompactedMain: (engineRef.shadowCompactionStats && engineRef.shadowCompactionStats.totalCompactedMain || 0) + mainResult.compactedNow,
-    totalCompactedCont: (engineRef.shadowCompactionStats && engineRef.shadowCompactionStats.totalCompactedCont || 0) + contResult.compactedNow,
+    totalCompactedMain: (priorStats.totalCompactedMain || 0) + mainResult.compactedNow,
+    totalCompactedCont: (priorStats.totalCompactedCont || 0) + contResult.compactedNow,
+    totalDroppedFoldedStubs: (priorStats.totalDroppedFoldedStubs || 0) + (mainResult.droppedStubs || 0) + (contResult.droppedStubs || 0),
     forensicWindow: SHADOW_FORENSIC_WINDOW,
+    companionForensicWindow: SHADOW_COMPANION_FORENSIC_WINDOW,
+    retainedStubCap: SHADOW_COMPACTED_STUB_CAP,
+    companionStubCap: SHADOW_COMPANION_STUB_CAP,
   };
-  return { folded, compactedMain: mainResult.compactedNow, compactedCont: contResult.compactedNow };
+  return { folded, compactedMain: mainResult.compactedNow, compactedCont: contResult.compactedNow, droppedStubs: (mainResult.droppedStubs || 0) + (contResult.droppedStubs || 0) };
 }
 // v43.10 storage growth/runway reporting. A bounded hourly snapshot history
 // (tiny storage cost — max 48 small records) lets the report distinguish
@@ -3619,8 +3790,12 @@ function recordShadowDedupCreation(vetoType, botKey, coin, side, researchMeta) {
     if (!engine || !researchMeta || !researchMeta.decisionCycleId) return { eventKey:null, isRepresentative:false };
     if (!engine.shadowDedupStats || typeof engine.shadowDedupStats !== "object") engine.shadowDedupStats = { byType:{}, recentEpisodeAt:{}, lastCycleId:null, cycleSeen:{} };
     const ds=engine.shadowDedupStats; if(!ds.byType) ds.byType={};
-    if(!ds.byType[vetoType]) ds.byType[vetoType]={rawRows:0,uniqueEvents:0,duplicateParticipantRows:0,redundantRows:0,sameStrategyRepeats25m:0};
+    if(!ds.byType[vetoType]) ds.byType[vetoType]={rawRows:0,uniqueEvents:0,duplicateParticipantRows:0,redundantRows:0,sameStrategyRepeats25m:0,knownSoleRelated:0,knownMultiRelated:0,pipelineFirstGlobalUnknown:0};
     const t=ds.byType[vetoType]; t.rawRows++;
+    const attr = researchMeta.vetoAttribution || "pipeline_first_global_unknown";
+    if (attr === "known_sole_related_group") t.knownSoleRelated = (t.knownSoleRelated || 0) + 1;
+    else if (attr === "known_multi_related_group") t.knownMultiRelated = (t.knownMultiRelated || 0) + 1;
+    else t.pipelineFirstGlobalUnknown = (t.pipelineFirstGlobalUnknown || 0) + 1;
     if(ds.lastCycleId!==researchMeta.decisionCycleId){ds.lastCycleId=researchMeta.decisionCycleId;ds.cycleSeen={};}
     const eventKey=`${researchMeta.decisionCycleId}|${coin}|${side}|${vetoType}`; const ex=ds.cycleSeen[eventKey]; let rep=false;
     if(!ex){ds.cycleSeen[eventKey]={rows:1};t.uniqueEvents++;rep=true;} else {ex.rows++;t.redundantRows++;t.duplicateParticipantRows+=ex.rows===2?2:1;}
@@ -3710,6 +3885,12 @@ function addShadowTrade(botKey, coin, side, entry, stop, target, reason, vetoTyp
     originalTarget: researchMeta && Number.isFinite(researchMeta.originalTarget) ? researchMeta.originalTarget : null,
     cappedTarget: researchMeta && Number.isFinite(researchMeta.cappedTarget) ? researchMeta.cappedTarget : null,
     capApplied: !!(researchMeta && researchMeta.capApplied),
+    vetoAttribution: researchMeta && researchMeta.vetoAttribution ? researchMeta.vetoAttribution : "pipeline_first_global_unknown",
+    vetoRegimeBucket: researchMeta && researchMeta.vetoRegimeBucket ? researchMeta.vetoRegimeBucket : "unknown",
+    vetoStableRegime: researchMeta && researchMeta.vetoStableRegime ? researchMeta.vetoStableRegime : null,
+    vetoClosedRocPct: researchMeta && Number.isFinite(researchMeta.vetoClosedRocPct) ? researchMeta.vetoClosedRocPct : null,
+    vetoAtrPct: researchMeta && Number.isFinite(researchMeta.vetoAtrPct) ? researchMeta.vetoAtrPct : null,
+    vetoVolRatio: researchMeta && Number.isFinite(researchMeta.vetoVolRatio) ? researchMeta.vetoVolRatio : null,
     pairedResearchOnly: !!(researchMeta && researchMeta.pairedResearchOnly),
     dedupEventKey: dedupMeta.eventKey, eventRepresentative: !!dedupMeta.isRepresentative,
   };
@@ -4602,6 +4783,10 @@ function generateReport() {
   if (startupIntegrityBlocked) out += `STARTUP INTEGRITY WARNING: corrupted/unreadable persisted research data was detected (${startupIntegrityWarnings.map(x => x.key).join(", ")}). This state is NOT a clean benchmark baseline; verified Reset required.\n`;
   out += `Coin universe at start: ${engine.startCoinList ? engine.startCoinList.join(", ") : "(not recorded — pre-P2-3 save; current is " + coinList.join(", ") + ")"}\n`;
   out += `Auto-add at start: ${engine.startBuildTag ? (engine.startAutoAddOn ? "ON" : "OFF") : "(not recorded)"} | Fixed-universe benchmark lock: ${engine.benchmarkLock ? "ON" : "OFF"}\n`;
+  out += `\n=== V43.11 BUILD CHANGE / RESEARCH LOG ===\n`;
+  out += `Fields: priority | item | status | why | expected | actual/current evidence | verdict | evidence level\n`;
+  V4311_CHANGE_LOG.forEach(([priority,item,status,why,expected,actual,verdict,evidence]) => { out += `${priority} | ${item} | ${status} | ${why} | expected: ${expected} | actual: ${actual} | verdict: ${verdict} | evidence: ${evidence}\n`; });
+  out += `Trading-policy note: v43.11 adds engineering reliability + research instrumentation only. It does NOT loosen/tighten strategy thresholds, score gates, stop/target rules, cooldowns, exposure caps, or live exit rules.\n\n`;
   // P2-5 fix: startToggles was already being captured at Start but never
   // actually printed anywhere — the report couldn't tell you which
   // strategies were even eligible to trade from the beginning of the run.
@@ -4678,6 +4863,14 @@ function generateReport() {
     // benchmark report can do here.
     if (h.cadenceGapCount) {
       out += `Cadence gaps/late cycle starts: ${h.cadenceGapCount} incident(s), longest observed gap ${(h.cadenceGapMaxMs/1000).toFixed(1)}s, excess delay ${(h.cadenceGapTotalMs/60000).toFixed(1)} min, estimated missed 30s ticks ${h.missedTickEstimate || 0} — entries during missed windows cannot be reconstructed\n`;
+      const fmtMap = m => (m && Object.keys(m).length) ? Object.entries(m).map(([k,v])=>`${k}:${v}`).join(", ") : "no context yet";
+      out += `Cadence context at delayed-cycle start — visibility ${fmtMap(h.cadenceGapByVisibility)} | focus ${fmtMap(h.cadenceGapByFocus)} | network ${fmtMap(h.cadenceGapByOnline)}\n`;
+      const cds = Array.isArray(h.cadenceGapDiagnostics) ? h.cadenceGapDiagnostics : [];
+      if (cds.length) {
+        const longN = cds.filter(x=>x.longGap).length;
+        out += `Cadence diagnostic rows retained: ${cds.length} (bounded to latest 200) | >=120s gaps ${longN}. Recent incidents:\n`;
+        cds.slice(-10).forEach(x => { out += `  ${new Date(x.at).toLocaleString()} | gap ${(x.gapMs/1000).toFixed(1)}s | excess ${(x.excessMs/1000).toFixed(1)}s | missed ${x.missedTicks||0} | ${x.visibility}/${x.focus}/${x.online} | previous refresh ${Number.isFinite(x.previousRefreshMs)?(x.previousRefreshMs/1000).toFixed(1)+"s":"n/a"}\n`; });
+      }
     }
     const hadCadenceGap = h.cadenceGapCount > 0;
     // P1-7 fix: the previous classifier only checked fullSyncPct>=99,
@@ -4713,16 +4906,23 @@ function generateReport() {
   const rtObj = isPlainObject(engine.regimeTelemetry) ? engine.regimeTelemetry : {};
   const rtCoins = Object.keys(rtObj).sort();
   let rtTotal = 0, rtGapRows = 0, rtDisagreeRows = 0;
+  const rtConfirmedGreaterThanRaw = [];
   rtCoins.forEach(c => {
     const rows = Array.isArray(rtObj[c]) ? rtObj[c] : [];
     rtTotal += rows.length;
     let rawChanges = 0, confirmedChanges = 0, gaps = 0, disagreements = 0;
+    let confIntoMixed = 0, confOutOfMixed = 0, confDirect = 0;
     let prevRaw = null, prevConf = null;
     const episodes = []; let epCode = null, epLen = 0;
     rows.forEach(r => {
       if (!Array.isArray(r) || r.length < 11) return;
       if (prevRaw !== null && r[1] !== prevRaw) rawChanges++;
-      if (prevConf !== null && r[2] !== prevConf) confirmedChanges++;
+      if (prevConf !== null && r[2] !== prevConf) {
+        confirmedChanges++;
+        if (prevConf !== 0 && r[2] === 0) confIntoMixed++;
+        else if (prevConf === 0 && r[2] !== 0) confOutOfMixed++;
+        else confDirect++;
+      }
       prevRaw = r[1]; prevConf = r[2];
       if ((r[4] || 0) > 0) gaps++;
       if (r[1] !== r[8]) disagreements++;
@@ -4738,7 +4938,8 @@ function generateReport() {
     const coverageH = rows.length > 1 ? ((rows[rows.length-1][0] - rows[0][0] + FIFTEEN_MS) / 3600000) : rows.length ? 0.25 : 0;
     const rawPerDay = coverageH > 0 ? rawChanges * 24 / coverageH : 0;
     const confPerDay = coverageH > 0 ? confirmedChanges * 24 / coverageH : 0;
-    out += `${c}: ${rows.length} closed candles | coverage ${coverageH.toFixed(1)}h | raw changes ${rawChanges} (${rawPerDay.toFixed(1)}/day) | confirmed changes ${confirmedChanges} (${confPerDay.toFixed(1)}/day) | median confirmed spell ${medianEp == null ? "n/a" : medianEp + " candle(s)"} | gap rows ${gaps} | live/closed disagreements ${disagreements}\n`;
+    out += `${c}: ${rows.length} closed candles | coverage ${coverageH.toFixed(1)}h | raw changes ${rawChanges} (${rawPerDay.toFixed(1)}/day) | confirmed changes ${confirmedChanges} (${confPerDay.toFixed(1)}/day) [into-mixed ${confIntoMixed}, out-of-mixed ${confOutOfMixed}, direct ${confDirect}] | median confirmed spell ${medianEp == null ? "n/a" : medianEp + " candle(s)"} | gap rows ${gaps} | live/closed disagreements ${disagreements}\n`;
+    if (confirmedChanges > rawChanges) rtConfirmedGreaterThanRaw.push({ coin: c, rawChanges, confirmedChanges, confIntoMixed, confOutOfMixed, confDirect });
   });
   if (!rtCoins.length) out += `No v43.8 closed-candle regime telemetry recorded yet.\n`;
   const rx = Array.isArray(engine.regimeExitTelemetry) ? engine.regimeExitTelemetry : [];
@@ -4749,7 +4950,9 @@ function generateReport() {
   out += `Exit diagnostics: ${rx.length} transition/event rows | legacy two-refresh would-close events ${legacyWouldClose} | same-forming-candle legacy confirmations ${hReg ? (hReg.legacySameCandleExitConfirmations || 0) : 0} | actual stable closed-candle exits ${actualStableExits}\n`;
   const teleClean = hReg && !(hReg.regimeTelemetryErrors || hReg.regimeDiagnosticMismatchCount);
   out += `Regime telemetry integrity: ${teleClean ? "CLEAN" : "INCOMPLETE / CHECK ERRORS"} | errors ${hReg ? (hReg.regimeTelemetryErrors || 0) : 0} | reconstruction mismatches ${hReg ? (hReg.regimeDiagnosticMismatchCount || 0) : 0}\n`;
-  try { out += `Current dashboard-owned localStorage estimate: ${(estimateDashboardCurrentBytes()/1024/1024).toFixed(2)} MB | research soft ceiling ${(RESEARCH_STORAGE_SOFT_CEILING_BYTES/1024/1024).toFixed(2)} MB (this is what the ceiling/halt is based on as of v43.10-r2 — dashboard-current keys only, NOT stale legacy — see full storage section below for the whole-origin figure and per-key breakdown)\n`; } catch (_) {}
+  out += `Regime-counter semantics: a raw-state change resets confirmation to mixed on its first closed candle, then a second consecutive closed candle confirms the new state. One raw transition can therefore produce two confirmed-state transitions (old confirmed -> mixed -> new confirmed), so confirmed changes may legitimately exceed raw changes.\n`;
+  if (rtConfirmedGreaterThanRaw.length) out += `Confirmed>raw audit list: ${rtConfirmedGreaterThanRaw.map(x => `${x.coin} raw ${x.rawChanges}/confirmed ${x.confirmedChanges} [into-mixed ${x.confIntoMixed}, out-of-mixed ${x.confOutOfMixed}, direct ${x.confDirect}]`).join("; ")}\n`;
+  try { out += `Current dashboard-owned localStorage estimate: ${(estimateDashboardOwnedBytes()/1024/1024).toFixed(2)} MB | research soft ceiling ${(RESEARCH_STORAGE_SOFT_CEILING_BYTES/1024/1024).toFixed(2)} MB (ceiling/halt basis; see storage section below)\n`; } catch (_) {}
 
   out += `\n=== TRADE / REGIME LINKAGE (regime-integrity-era telemetry window only) ===\n`;
   const linkTrades = (engine.allTradesEver || []).filter(t => Number.isFinite(t.openedAt));
@@ -4905,7 +5108,7 @@ function generateReport() {
   if (!cfgEvents.length) out += `None after run start.\n\n`;
   else { cfgEvents.forEach(e => { out += `[${new Date(e.t).toLocaleString()}] ${e.kind}: ${e.detail}\n`; }); out += `\n`; }
 
-  out += `=== CORRELATED EXPOSURE (measurement only — strategies remain fully independent) ===\n`;
+  out += `=== SAME-COIN DUPLICATE-THESIS EXPOSURE (measurement only — strategies remain fully independent) ===\n`;
   // v36 fix: was filtered by toggles[t.bot] — same historical-shouldn't-
   // depend-on-today's-toggle inconsistency as the sections already fixed.
   const allTradesForCluster = engine.allTradesEver || [];
@@ -4917,7 +5120,7 @@ function generateReport() {
   const winRateOf = arr => { const w = arr.filter(t=>t.result==="Win").length, l = arr.filter(t=>t.result==="Loss").length; return (w+l) ? w/(w+l)*100 : 0; };
   out += `Trades sharing a coin+direction with another active strategy at entry: ${clustered.length} of ${allTradesForCluster.length} | win rate ${fmt(winRateOf(clustered),1)}% | net $${fmt(netOf(clustered))}\n`;
   out += `Trades with no other strategy on the same coin+direction: ${isolated.length} of ${allTradesForCluster.length} | win rate ${fmt(winRateOf(isolated),1)}% | net $${fmt(netOf(isolated))}\n`;
-  out += `Interpretation: if clustered trades underperform isolated ones, several strategies may be repeatedly multiplying exposure to the same underlying market thesis rather than genuinely diversifying it.\n\n`;
+  out += `Interpretation: this measures SAME-COIN + SAME-DIRECTION duplication across strategies only. It is intentionally separate from the broad cross-coin market-wave research below; duplicate-thesis risk and market-wide confirmation are not merged into one exposure metric.\n\n`;
 
   out += `=== STRATEGY TOTALS (all coins combined) ===\n`;
   const allEverTrades = engine.allTradesEver || [];
@@ -5032,7 +5235,7 @@ function generateReport() {
     groups.forEach(rows => { for (let i=1;i<rows.length;i++) if (rows[i].t - rows[i-1].t <= 25*60000) repeats++; });
     return repeats;
   })();
-  out += `\n=== V43.10 TARGET-CAP EVENT-LEVEL RESEARCH ===\n`;
+  out += `\n=== V43.11 TARGET-CAP EVENT-LEVEL RESEARCH ===\n`;
   out += `Raw capped-target shadow rows retained: ${capRows.length} | unique decision-cycle coin+side event(s): ${capClusters.size} | rows participating in cross-strategy duplicate clusters: ${capDuplicateParticipants} | redundant rows after exact cycle-level dedup: ${capRedundant} | same-strategy repeat episode(s) within 25m: ${capSameStrategyRepeats}\n`;
   out += `Original-uncapped companion shadows retained: ${capOrigRows.length}. These are the counterfactual needed to distinguish 'capped target would hit' from 'original 2.5R target would hit'.\n`;
   if (capRows.length) {
@@ -5050,23 +5253,50 @@ function generateReport() {
   }
 
 
-  out += `\n=== V43.10 SHADOW EVENT-LEVEL DEDUPLICATION ===\n`;
+  out += `\n=== V43.11 SHADOW EVENT-LEVEL DEDUPLICATION ===\n`;
   const dStats = engine.shadowDedupStats && engine.shadowDedupStats.byType ? engine.shadowDedupStats.byType : {};
   if (!Object.keys(dStats).length) out += `No dedup rows recorded yet.\n`;
   else Object.entries(dStats).sort((a,b)=>(b[1].rawRows||0)-(a[1].rawRows||0)).forEach(([vt,d]) => {
     out += `${vLabels[vt] || vt}: raw ${d.rawRows||0} | unique same-cycle coin+side events ${d.uniqueEvents||0} | duplicate-participant rows ${d.duplicateParticipantRows||0} | redundant rows ${d.redundantRows||0} | same-strategy repeat episodes <=25m ${d.sameStrategyRepeats25m||0}\n`;
   });
   out += `Cumulative creation-time dedup statistics; target-cap paired outcomes are preserved separately below.\n`;
+  out += `\n=== V43.11 VETO ATTRIBUTION OUTCOMES ===\n`;
+  const vas = engine.vetoAttributionOutcomeStats && typeof engine.vetoAttributionOutcomeStats === "object" ? engine.vetoAttributionOutcomeStats : {};
+  if (!Object.keys(vas).length) out += `No resolved attribution outcomes recorded yet.\n`;
+  else {
+    const grouped = {};
+    Object.values(vas).forEach(x => { if (!grouped[x.vetoType]) grouped[x.vetoType] = []; grouped[x.vetoType].push(x); });
+    Object.keys(grouped).sort().forEach(vt => {
+      out += `${vLabels[vt] || vt}:\n`;
+      grouped[vt].forEach(x => { const decided=(x.wins||0)+(x.losses||0); const wr=decided?100*(x.wins||0)/decided:null; const avg=(x.hypNetCount||0)?(x.hypNetSum||0)/x.hypNetCount:null; out += `  ${x.attribution}: ${x.n||0} resolved | ${(x.wins||0)}W/${(x.losses||0)}L/${(x.ambiguous||0)} ambiguous/${(x.timeouts||0)} timeout | win rate ${wr==null?"n/a":wr.toFixed(1)+"%"} | avg hyp P/L ${avg==null?"n/a":"$"+fmt(avg)}\n`; });
+    });
+    out += `Attribution scope note: known_sole_related_group / known_multi_related_group currently apply only where parallel related checks are evaluated together. Other vetoes are intentionally labelled pipeline_first_global_unknown because later gates short-circuit and were not evaluated; this avoids false sole-veto claims.\n`;
+  }
+  out += `\n=== V43.11 VETO OUTCOMES BY MARKET REGIME ===\n`;
+  const vrs = engine.vetoRegimeOutcomeStats && typeof engine.vetoRegimeOutcomeStats === "object" ? engine.vetoRegimeOutcomeStats : {};
+  if (!Object.keys(vrs).length) out += `No resolved regime-conditioned veto outcomes recorded yet.\n`;
+  else {
+    const order=["strong_bull","weak_bull","mixed","weak_bear","strong_bear","unknown"];
+    const byVeto={}; Object.values(vrs).forEach(x=>{if(!byVeto[x.vetoType])byVeto[x.vetoType]=[];byVeto[x.vetoType].push(x);});
+    Object.keys(byVeto).sort().forEach(vt=>{out += `${vLabels[vt]||vt}:\n`; byVeto[vt].sort((a,b)=>order.indexOf(a.regimeBucket)-order.indexOf(b.regimeBucket)).forEach(x=>{const d=(x.wins||0)+(x.losses||0),wr=d?100*(x.wins||0)/d:null,avg=(x.hypNetCount||0)?(x.hypNetSum||0)/x.hypNetCount:null;out += `  ${x.regimeBucket}: ${x.n||0} resolved | ${(x.wins||0)}W/${(x.losses||0)}L | win rate ${wr==null?"n/a":wr.toFixed(1)+"%"} | avg hyp P/L ${avg==null?"n/a":"$"+fmt(avg)}\n`;});});
+    out += `Regime bucket definition is research-only: stable bull/bear plus closed ROC >= +1.5% / <= -1.5% marks strong; otherwise weak; mixed remains mixed. No live filter threshold changes.\n`;
+  }
 
-  out += `\n=== V43.10 SCORE SUB-CHECK OUTCOME RESEARCH ===\n`;
+  out += `\n=== V43.11 SCORE SUB-CHECK OUTCOME RESEARCH ===\n`;
   const scoreTrades = (engine.allTradesEver || []).filter(t => t.entrySnapshot && t.entrySnapshot.scoreBreakdown && t.entrySnapshot.scoreBreakdown.subchecks && t.result !== "Ambiguous");
   const scoreChecks = [["SMA10/30 aligned","sma10_30Aligned"],["price/SMA96 aligned","priceVsSma96Aligned"],["price/SMA192 aligned","priceVsSma192Aligned"],["MACD direction aligned","macdDirectionAligned"],["RSI healthy band","rsiHealthyBand"],["RSI extreme countertrend","rsiExtremeCountertrend"]];
   if (!scoreTrades.length) out += `No decided scored trades yet.\n`;
   else scoreChecks.forEach(([label,key]) => { const yes=scoreTrades.filter(t=>!!t.entrySnapshot.scoreBreakdown.subchecks[key]),no=scoreTrades.filter(t=>!t.entrySnapshot.scoreBreakdown.subchecks[key]); const f=a=>{const w=a.filter(t=>t.result==="Win").length,l=a.filter(t=>t.result==="Loss").length,net=a.reduce((x,t)=>x+(t.netPnl||0),0);return `${a.length} trades, ${w}W/${l}L, net $${fmt(net)}, avg $${fmt(a.length?net/a.length:0)}`}; out += `${label}: YES ${f(yes)} | NO ${f(no)}\n`; });
   const tripleTrend=scoreTrades.filter(t=>{const q=t.entrySnapshot.scoreBreakdown.subchecks;return q.sma10_30Aligned&&q.priceVsSma96Aligned&&q.priceVsSma192Aligned;});
   out += `All three trend sub-checks aligned simultaneously: ${tripleTrend.length}/${scoreTrades.length} decided trade(s) — direct double-counting diagnostic.\n`;
+  const altScored=scoreTrades.filter(t=>Number.isFinite(t.entrySnapshot.scoreBreakdown.researchDecorrelatedTotal));
+  if (altScored.length) {
+    out += `Research-only de-correlated score (does NOT gate trades): ${altScored.length} decided trade(s). Trend family uses one composite factor, so 2 vs 3 aligned trend checks do not add extra weight.\n`;
+    const altBuckets=[["80-100",t=>t.entrySnapshot.scoreBreakdown.researchDecorrelatedTotal>=80],["70-79",t=>{const x=t.entrySnapshot.scoreBreakdown.researchDecorrelatedTotal;return x>=70&&x<80;}],["65-69",t=>{const x=t.entrySnapshot.scoreBreakdown.researchDecorrelatedTotal;return x>=65&&x<70;}],["Below 65",t=>t.entrySnapshot.scoreBreakdown.researchDecorrelatedTotal<65]];
+    altBuckets.forEach(([label,pred])=>{const a=altScored.filter(pred);if(!a.length){out += `  ${label}: no trades\n`;return;}const w=a.filter(t=>t.result==="Win").length,l=a.filter(t=>t.result==="Loss").length,net=a.reduce((z,t)=>z+(t.netPnl||0),0);out += `  ${label}: ${a.length} trade(s) | ${w}W/${l}L | net $${fmt(net)} | avg $${fmt(net/a.length)}\n`;});
+  }
 
-  out += `\n=== V43.10 GLOBAL MARKET-WAVE RESEARCH (by strategy — see below) ===\n`;
+  out += `\n=== V43.11 GLOBAL MARKET-WAVE RESEARCH (by strategy — see below) ===\n`;
   const waveTrades=(engine.allTradesEver||[]).filter(t=>t.result!=="Ambiguous");
   const waveBuckets=[["0 same-direction already open",t=>(t.globalSameDirectionOpenAtEntry||0)===0],["1-2 same-direction already open",t=>(t.globalSameDirectionOpenAtEntry||0)>=1&&(t.globalSameDirectionOpenAtEntry||0)<=2],["3+ same-direction already open",t=>(t.globalSameDirectionOpenAtEntry||0)>=3],["0 same-direction entries in prior 20m",t=>(t.recentSameDirection20mAtEntry||0)===0],["1-2 same-direction entries in prior 20m",t=>(t.recentSameDirection20mAtEntry||0)>=1&&(t.recentSameDirection20mAtEntry||0)<=2],["3+ same-direction entries in prior 20m",t=>(t.recentSameDirection20mAtEntry||0)>=3]];
   out += `-- Pooled across all strategies --\n`;
@@ -5091,16 +5321,25 @@ function generateReport() {
     });
   });
   out += `Measurement only; no portfolio-wide exposure cap changed.\n`;
+  out += `\n=== V43.11 DONCHIAN MARKET-WAVE DETAIL ===\n`;
+  const donWave = waveTrades.filter(t=>t.bot==="donchian");
+  if (!donWave.length) out += `No decided Donchian trades yet.\n`;
+  else {
+    const db=[["0 prior same-direction entries / 20m",t=>(t.recentSameDirection20mAtEntry||0)===0],["1-2 prior same-direction entries / 20m",t=>(t.recentSameDirection20mAtEntry||0)>=1&&(t.recentSameDirection20mAtEntry||0)<=2],["3+ prior same-direction entries / 20m",t=>(t.recentSameDirection20mAtEntry||0)>=3]];
+    const avg=(a,fn)=>{const xs=a.map(fn).filter(Number.isFinite);return xs.length?xs.reduce((x,y)=>x+y,0)/xs.length:null;};
+    db.forEach(([label,pred])=>{const a=donWave.filter(pred);if(!a.length){out += `${label}: no trades\n`;return;}const w=a.filter(t=>t.result==="Win").length,l=a.filter(t=>t.result==="Loss").length,net=a.reduce((z,t)=>z+(t.netPnl||0),0),roc=avg(a,t=>t.entrySnapshot&&t.entrySnapshot.closedRocPct),atr=avg(a,t=>t.entrySnapshot&&Number.isFinite(t.entrySnapshot.atrPct)?t.entrySnapshot.atrPct*100:null),vol=avg(a,t=>t.entrySnapshot&&t.entrySnapshot.volRatio),age=avg(a,t=>t.entrySnapshot&&t.entrySnapshot.regimeAgeCandles),score=avg(a,t=>t.entryScore),mfe=avg(a,t=>t.mfePct),mae=avg(a,t=>t.maePct);out += `${label}: ${a.length} trade(s) | ${w}W/${l}L | net $${fmt(net)} | avg score ${score==null?"n/a":score.toFixed(1)} | avg regime age ${age==null?"n/a":age.toFixed(1)} candles | avg ROC ${roc==null?"n/a":roc.toFixed(2)+"%"} | avg ATR ${atr==null?"n/a":atr.toFixed(2)+"%"} | avg vol ${vol==null?"n/a":vol.toFixed(2)+"x"} | avg MFE ${mfe==null?"n/a":mfe.toFixed(2)+"%"} | avg MAE ${mae==null?"n/a":mae.toFixed(2)+"%"}\n`;});
+  }
+  out += `Research only. Same-coin duplicate-thesis exposure remains a separate measurement from broad cross-coin market-wave confirmation; neither changes allocation in v43.11.\n`;
 
 
-  out += `\n=== V43.10 PROFIT-PROTECTION COUNTERFACTUALS ===\n`;
+  out += `\n=== V43.11 PROFIT-PROTECTION COUNTERFACTUALS ===\n`;
   const prTrades=(engine.allTradesEver||[]).filter(t=>t.profitProtectionCounterfactuals&&t.result!=="Ambiguous");
   const prRules=[["Break-even after +1R","be1R"],["Lock +0.5R after +1R","lock05At1R"],["1R trailing stop after +1R","trail1R"],["Take 50% at +1R; remainder actual exit","halfAt1R"]];
   if(!prTrades.length) out += `No decided trades with counterfactual samples yet.\n`;
   else prRules.forEach(([label,key])=>{const rows=prTrades.map(t=>t.profitProtectionCounterfactuals[key]).filter(Boolean),armed=rows.filter(r=>r.armedAt).length,virtual=rows.filter(r=>r.armedAt&&r.virtualExitAt&&key!=="halfAt1R").length,delta=rows.reduce((a,r)=>a+(r.deltaVsActual||0),0);out += `${label}: ${rows.length} trade(s) | armed ${armed} | virtual stop exits ${virtual} | aggregate delta vs actual $${fmt(delta)} | avg delta $${fmt(rows.length?delta/rows.length:0)}\n`;});
   out += `Precision is live-refresh chronological (~30s), not tick-perfect; real exits are unchanged.\n`;
 
-  out += `\n=== V43.10 DONCHIAN RE-ARM INTEGRITY ===\n`;
+  out += `\n=== V43.11 DONCHIAN RE-ARM INTEGRITY ===\n`;
   const drs=ensureDonchianRearmStats()||{};
   const throttledDuplicateEvaluations = Math.max(0, (drs.candidatesWhileLocked||0) - (drs.rearmVetoes||0));
   out += `Locks created ${drs.locksCreated||0} | valid post-exit candle clears ${drs.validClears||0} | legacy premature-clear opportunities prevented ${drs.legacyPrematureClearOpportunities||0} | candidate signals evaluated while locked ${drs.candidatesWhileLocked||0} | distinct logged veto episodes ${drs.rearmVetoes||0}\n`;
@@ -5119,7 +5358,7 @@ function generateReport() {
   out += `Of those ${drs.candidatesWhileLocked||0} evaluations, ${throttledDuplicateEvaluations} were the same lock re-evaluated within an already-logged 20-minute episode (blockCandidate's existing log throttle, not a separate veto-ordering effect) — every evaluation while locked is blocked, but only one per 20-minute episode is logged as a distinct veto.\n`;
   out += `A reset candle must CLOSE after disarmedAt. Pre-exit closed-candle price evidence is diagnostic only and cannot clear the lock.\n`;
 
-  out += `\n=== V43.10 BOLLINGER GATE DIAGNOSTIC FUNNEL ===\n`;
+  out += `\n=== V43.11 BOLLINGER GATE DIAGNOSTIC FUNNEL ===\n`;
   out += `Diagnostic only — does not alter Bollinger's conditions/thresholds. Answers why Bollinger remains at ${(engine.allTradesEver||[]).filter(t=>t.bot==="boll").length} real trade(s) despite the shared RSI/Bollinger closed-volume bug being fixed in v43.9.\n`;
   const bf = engine.bollingerFunnel || {};
   const funnelStages = [
@@ -5141,27 +5380,59 @@ function generateReport() {
     }
   });
 
+  const ber = engine.bollingerEpisodeResearch && typeof engine.bollingerEpisodeResearch === "object" ? engine.bollingerEpisodeResearch : null;
+  if (ber && ber.totals) {
+    const bt = ber.totals, activeN = ber.active ? Object.keys(ber.active).length : 0;
+    out += `Unique signal episodes: ${bt.uniqueEpisodes||0} created | ${bt.endedEpisodes||0} ended | ${activeN} still active | ${bt.acceptedEpisodes||0} accepted. This is the independent-episode view; raw 30s evaluations above can repeat many times within one episode.\n`;
+    const uniqueStages = [
+      ["raw_signal","Raw band-signal episode"],
+      ["closed_mean_reversion_eval","Reached closed mean-reversion evaluation"],
+      ["permission_range","Range permission"],
+      ["permission_exhaustion","Exhaustion"],
+      ["permission_structure","Structure proximity"],
+      ["permission_volume","Permission volume"],
+      ["confirmation_first_closed","First closed-candle confirmation"],
+      ["confirmation_second_closed","Second closed-candle confirmation"],
+      ["global_volume","Global volume filter"],
+      ["severe_contradiction","Severe-contradiction gate"],
+      ["economics","Economics/final feasibility"],
+      ["accepted","Trade accepted"],
+    ];
+    out += `Unique-episode progression (reach/pass; an episode may fail a stage on an early refresh and later pass it before the signal episode ends):\n`;
+    uniqueStages.forEach(([k,label])=>{out += `  ${label}: reached ${bt.stageReach&&bt.stageReach[k]||0} | ever passed ${bt.stagePass&&bt.stagePass[k]||0}\n`;});
+    const terminal = bt.terminalStage || {};
+    out += `Ended-episode terminal stage: ${Object.keys(terminal).length ? Object.entries(terminal).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`${k} ${v}`).join(" | ") : "none yet"}\n`;
+  } else out += `Unique signal-episode research: no data yet (starts on a fresh v43.11 run).\n`;
 
-  out += `\n=== V43.10 TARGET-CAP CUMULATIVE PAIRED OUTCOMES ===\n`;
+
+  out += `\n=== V43.11 TARGET-CAP CUMULATIVE PAIRED OUTCOMES ===\n`;
   const capRegistry=engine.targetCapEventRegistry&&typeof engine.targetCapEventRegistry==="object"?engine.targetCapEventRegistry:{},capEvents=Object.values(capRegistry),paired=capEvents.filter(e=>e.capped&&e.original&&!e.mismatch),pc={bothWin:0,cappedWinOriginalLoss:0,bothLoss:0,other:0,cappedAmb:0,originalAmb:0};
   paired.forEach(e=>{const c=e.capped.resolution,o=e.original.resolution;if(c==="ambiguous")pc.cappedAmb++;if(o==="ambiguous")pc.originalAmb++;if(c==="would_win"&&o==="would_win")pc.bothWin++;else if(c==="would_win"&&o==="would_lose")pc.cappedWinOriginalLoss++;else if(c==="would_lose"&&o==="would_lose")pc.bothLoss++;else pc.other++;});
   out += `Cumulative registry events ${capEvents.length} | fully paired clean events ${paired.length} | mismatch flags ${capEvents.filter(e=>e.mismatch).length}\n`;
   out += `Both win ${pc.bothWin} | capped wins/original loses ${pc.cappedWinOriginalLoss} | both lose ${pc.bothLoss} | other/timeout/mixed ${pc.other} | capped ambiguous ${pc.cappedAmb} | original ambiguous ${pc.originalAmb}\n`;
   const pairedDelta=paired.reduce((a,e)=>a+((e.capped.hypotheticalPnl||0)-(e.original.hypotheticalPnl||0)),0); out += `Aggregate capped-minus-original hypothetical P/L: $${fmt(pairedDelta)}\n`;
+  if (paired.length) {
+    const rrRows = paired.map(e=>{const risk=Math.abs((e.entry||0)-(e.stop||0)); if(!(risk>0)) return null; return { capped: Number.isFinite(e.cappedTarget)?Math.abs(e.cappedTarget-e.entry)/risk:null, original: Number.isFinite(e.originalTarget)?Math.abs(e.originalTarget-e.entry)/risk:null };}).filter(Boolean);
+    const rrAvg=(k)=>{const a=rrRows.map(x=>x[k]).filter(Number.isFinite);return a.length?a.reduce((x,y)=>x+y,0)/a.length:null;};
+    out += `Paired target R:R context: avg capped ${rrAvg("capped")==null?"n/a":rrAvg("capped").toFixed(2)}R | avg original ${rrAvg("original")==null?"n/a":rrAvg("original").toFixed(2)}R. Final live acceptance still revalidates the capped target against the 0.80R floor before min-profit and reachability checks.\n`;
+  }
 
-  out += `\n=== V43.10 STORAGE COMPONENT ESTIMATE ===\n`;
+  out += `\n=== V43.11 ECONOMICS ORDER AUDIT ===\n`;
+  out += `Source-order audit PASS: structural target cap is applied first; directional validity is checked next; actualTargetDistPct is then computed from the FINAL capped target; the 0.80R floor is enforced from that final distance; expected-net minimum-profit and target-reachability checks run afterward. R:R display is now 2 decimals so near-floor passes (for example 0.81R) are not visually rounded to 0.8R. No trading threshold changed.\n`;
+  out += `\n=== V43.11 STORAGE COMPONENT ESTIMATE ===\n`;
   const mainShadowRows=shadowTrades.filter(st=>!st.pairedResearchOnly),researchShadowRows=shadowTrades.filter(st=>st.pairedResearchOnly);
-  [["Regime telemetry",engine.regimeTelemetry],["Regime-exit telemetry",engine.regimeExitTelemetry],["Real-trade ledger",engine.allTradesEver],["Main shadow detail",mainShadowRows],["Research-only target companions",researchShadowRows],["Continuation shadows",continuationShadows],["Veto detail",vetoLog],["Target-cap cumulative registry",engine.targetCapEventRegistry],["Shadow dedup stats",engine.shadowDedupStats],["Engine events",engineEvents]].forEach(([label,obj])=>{const b=approxJsonBytes(obj);out += `${label}: ${b==null?"n/a":(b/1024).toFixed(1)+" KB"}\n`;});
-  // v43.10-r2 (corrected post-audit): the ceiling/halt decision
-  // (projectedStorageBytesWithEngine) now uses dashboard-CURRENT bytes only
-  // — not dashboard-stale-legacy — so old v43.6-v43.9 leftover keys can no
-  // longer block this run's own current collection. This line reports that
-  // same corrected basis, not the whole browser origin.
+  [["Regime telemetry",engine.regimeTelemetry],["Regime-exit telemetry",engine.regimeExitTelemetry],["Real-trade ledger",engine.allTradesEver],["Main shadow detail",mainShadowRows],["Research-only target companions",researchShadowRows],["Continuation shadows",continuationShadows],["Veto detail",vetoLog],["Target-cap cumulative registry",engine.targetCapEventRegistry],["Shadow dedup stats",engine.shadowDedupStats],["Veto attribution outcome stats",engine.vetoAttributionOutcomeStats],["Veto regime outcome stats",engine.vetoRegimeOutcomeStats],["Bollinger episode research",engine.bollingerEpisodeResearch],["Cadence gap diagnostics",engine.apiHealth&&engine.apiHealth.cadenceGapDiagnostics],["Engine events",engineEvents]].forEach(([label,obj])=>{const b=approxJsonBytes(obj);out += `${label}: ${b==null?"n/a":(b/1024).toFixed(1)+" KB"}\n`;});
+  const scs = engine.shadowCompactionStats || {};
+  out += `Resolved-evidence compaction: full-detail window main ${scs.forensicWindow ?? SHADOW_FORENSIC_WINDOW}, companion ${scs.companionForensicWindow ?? SHADOW_COMPANION_FORENSIC_WINDOW} | retained-stub caps main ${scs.retainedStubCap ?? SHADOW_COMPACTED_STUB_CAP}, companion ${scs.companionStubCap ?? SHADOW_COMPANION_STUB_CAP} | compacted main ${scs.totalCompactedMain||0}, continuation ${scs.totalCompactedCont||0} | old folded stubs dropped after cumulative preservation ${scs.totalDroppedFoldedStubs||0}. Unresolved shadows are never removed by this compaction.\n`;
+  // v43.10-r2: the ceiling/halt decision (projectedStorageBytesWithEngine)
+  // now uses dashboard-owned bytes only — this line reports that SAME basis,
+  // not the whole browser origin, so the number driving real behavior is the
+  // one shown first and clearly labeled.
   try{
-    const currentB=estimateDashboardCurrentBytes(),originB=estimateLocalStorageBytes();
-    const remain=Math.max(0,RESEARCH_STORAGE_SOFT_CEILING_BYTES-currentB),elapsedH=Math.max(.01,(Date.now()-(engine.startedAt||Date.now()))/3600000),rate=currentB/elapsedH;
-    out += `Dashboard-current storage (drives the 3.50MB ceiling and shadow-sampling halt — active keys only, excludes stale legacy): ${(currentB/1024/1024).toFixed(2)} MB | ceiling ${(RESEARCH_STORAGE_SOFT_CEILING_BYTES/1024/1024).toFixed(2)} MB | headroom ${(remain/1024/1024).toFixed(2)} MB | naive runway ${rate>0?(remain/rate).toFixed(1)+"h":"n/a"} at average bytes/hour since start.\n`;
-    out += `Whole-origin storage (environmental diagnostic only — does NOT drive the halt: other same-origin apps' data (e.g. Research Lab) and this app's own stale legacy keys genuinely do not affect collection as of this correction): ${(originB/1024/1024).toFixed(2)} MB${originB>currentB?` (${((originB-currentB)/1024/1024).toFixed(2)} MB of this is outside dashboard-current keys — see per-key table below for exactly what)`:""}\n`;
+    const ownedB=estimateDashboardOwnedBytes(),originB=estimateLocalStorageBytes();
+    const remain=Math.max(0,RESEARCH_STORAGE_SOFT_CEILING_BYTES-ownedB),elapsedH=Math.max(.01,(Date.now()-(engine.startedAt||Date.now()))/3600000),rate=ownedB/elapsedH;
+    out += `Dashboard-owned storage (drives the 3.50MB ceiling and shadow-sampling halt): ${(ownedB/1024/1024).toFixed(2)} MB | ceiling ${(RESEARCH_STORAGE_SOFT_CEILING_BYTES/1024/1024).toFixed(2)} MB | headroom ${(remain/1024/1024).toFixed(2)} MB | naive runway ${rate>0?(remain/rate).toFixed(1)+"h":"n/a"} at average bytes/hour since start.\n`;
+    out += `Whole-origin storage (environmental diagnostic only — does NOT drive the halt; other same-origin apps' data, e.g. Research Lab, or this app's own stale legacy keys, can appear here without affecting collection): ${(originB/1024/1024).toFixed(2)} MB${originB>ownedB?` (${((originB-ownedB)/1024/1024).toFixed(2)} MB of this is outside dashboard-owned keys — see per-key table below)`:""}\n`;
     const gs = storageGrowthStats(engine);
     if (gs) {
       const recentRunwayH = gs.bytesPerHour > 0 ? remain / gs.bytesPerHour : null;
@@ -5171,7 +5442,7 @@ function generateReport() {
     }
   }catch(_){}
 
-  out += `\n=== V43.10-r2 STORAGE OWNERSHIP DIAGNOSTIC (per-key breakdown) ===\n`;
+  out += `\n=== V43.11 STORAGE OWNERSHIP DIAGNOSTIC (per-key breakdown) ===\n`;
   out += `${STORAGE_ACCOUNTING_REVISION}\n`;
   try {
     const rows = storageKeyBreakdown();
@@ -5186,10 +5457,10 @@ function generateReport() {
   } catch (_) { out += `Per-key breakdown unavailable (localStorage enumeration failed).\n`; }
 
 
-  out += `\n=== V43.10 INSTRUMENTATION COMPLETENESS ===\n`;
+  out += `\n=== V43.11 INSTRUMENTATION COMPLETENESS ===\n`;
   const ih=engine.instrumentationHealth||{},installed=engine.instrumentationVersion===V439_INSTRUMENTATION_VERSION;
   out += `Data/shadow evidence integrity is separate from instrumentation completeness. Package ${installed?"INSTALLED":"MISMATCH / OLD RUN"} (${engine.instrumentationVersion||"none"}); runtime research errors ${ih.errors||0}${ih.byModule&&Object.keys(ih.byModule).length?` | ${Object.entries(ih.byModule).map(([k,v])=>`${k}:${v}`).join(", ")}`:""}.\n`;
-  out += `Expected modules: closed-volume reversal state; timestamp-safe Donchian re-arm; cumulative shadow dedup counters; score sub-check outcomes; market-wave outcomes; chronological profit-protection counterfactuals; cumulative target-cap paired registry; storage component reporting.\n`;
+  out += `Expected modules: closed-volume reversal state; timestamp-safe Donchian re-arm; cumulative shadow dedup + attribution counters; score sub-check + de-correlated research outcomes; market-wave outcomes; chronological profit-protection counterfactuals; cumulative target-cap paired registry; storage compaction/reporting; cadence root-cause diagnostics; unique Bollinger episode funnel.\n`;
 
   out += `\n=== BY COIN, BY STRATEGY ===\n`;
   // v33 fix: was scoped to coinList only, silently dropping any removed
@@ -5237,7 +5508,7 @@ function generateReport() {
     const scoreSubStr = sub ? ` | Score subchecks: SMA10/30 aligned ${sub.sma10_30Aligned?"Y":"N"}, px/SMA96 aligned ${sub.priceVsSma96Aligned?"Y":"N"}, px/SMA192 aligned ${sub.priceVsSma192Aligned?"Y":"N"}, MACD dir aligned ${sub.macdDirectionAligned?"Y":"N"}, RSI healthy ${sub.rsiHealthyBand?"Y":"N"}, RSI extreme countertrend ${sub.rsiExtremeCountertrend?"Y":"N"}` : "";
     const snapStr = `RSI ${snap.rsi != null ? snap.rsi.toFixed(1) : "n/a"}, MACD hist ${snap.macdHist != null ? snap.macdHist.toFixed(3) : "n/a"}, stable regime ${snap.regime || "n/a"}, live regime ${snap.liveRegime || "n/a"}, closed raw ${snap.closedRawRegime || "n/a"}, regime age ${snap.regimeAgeCandles != null ? snap.regimeAgeCandles+" candles" : "n/a"}, boundary +${snap.entryBoundarySeconds != null ? snap.entryBoundarySeconds+"s" : "n/a"}, closed ROC ${snap.closedRocPct != null ? snap.closedRocPct.toFixed(2)+"%" : "n/a"}, ATR ${snap.atrPct != null ? (snap.atrPct*100).toFixed(2)+"%" : "n/a"}, vol ${snap.volRatio != null ? snap.volRatio.toFixed(2)+"x" : "n/a"}${scoreSubStr}`;
     const clusterStr = (t.sameCoinSameSideOtherBots && t.sameCoinSameSideOtherBots.length) ? `Also open on this coin+direction: ${t.sameCoinSameSideOtherBots.join(", ")}` : "No other strategy on this coin+direction";
-    out += `[${new Date(t.closedAt).toLocaleString()}] ${t.botLabel} | ${t.coin} ${t.side} | Entered: ${entryTimeStr} | Duration: ${durStr} | Reason for entry: ${t.reason || "n/a"} | Score at entry: ${t.entryScore == null ? "n/a" : t.entryScore} | Entry $${fmt(t.entry, pd)} Stop $${fmt(t.stop, pd)} Target $${fmt(t.target, pd)} | Lev ${t.leverage}x | R:R ${fmt(t.riskReward, 1)} | MAE ${maeStr} MFE ${mfeStr} | Concurrent: ${concStr} | Cluster: ${clusterStr} | Market-wave: ${t.globalSameDirectionOpenAtEntry || 0} same-direction already open, ${t.recentSameDirection20mAtEntry || 0} opened in prior 20m | Entry snapshot: ${snapStr} | Exit $${fmt(t.exitPrice, pd)} (${t.exitReason}) | Gross $${fmt(t.grossPnl)} Fees $${fmt(t.fees)} Net $${fmt(t.netPnl)} | Balance after $${fmt(t.balanceAfter)} | ${t.result}\n`;
+    out += `[${new Date(t.closedAt).toLocaleString()}] ${t.botLabel} | ${t.coin} ${t.side} | Entered: ${entryTimeStr} | Duration: ${durStr} | Reason for entry: ${t.reason || "n/a"} | Score at entry: ${t.entryScore == null ? "n/a" : t.entryScore} | Entry $${fmt(t.entry, pd)} Stop $${fmt(t.stop, pd)} Target $${fmt(t.target, pd)} | Lev ${t.leverage}x | R:R ${fmt(t.riskReward, 2)} | MAE ${maeStr} MFE ${mfeStr} | Concurrent: ${concStr} | Cluster: ${clusterStr} | Market-wave: ${t.globalSameDirectionOpenAtEntry || 0} same-direction already open, ${t.recentSameDirection20mAtEntry || 0} opened in prior 20m | Entry snapshot: ${snapStr} | Exit $${fmt(t.exitPrice, pd)} (${t.exitReason}) | Gross $${fmt(t.grossPnl)} Fees $${fmt(t.fees)} Net $${fmt(t.netPnl)} | Balance after $${fmt(t.balanceAfter)} | ${t.result}\n`;
   });
 
   return out;
@@ -5313,7 +5584,33 @@ async function refresh() {
         if (gap > GAP_WARN_MS) {
           h.cadenceGapCount = (h.cadenceGapCount || 0) + 1;
           h.cadenceGapTotalMs = (h.cadenceGapTotalMs || 0) + Math.max(0, gap - EXPECTED_CADENCE_MS);
-          h.missedTickEstimate = (h.missedTickEstimate || 0) + Math.max(0, Math.floor(gap / EXPECTED_CADENCE_MS) - 1);
+          const missed = Math.max(0, Math.floor(gap / EXPECTED_CADENCE_MS) - 1);
+          h.missedTickEstimate = (h.missedTickEstimate || 0) + missed;
+          const visibility = (typeof document !== "undefined" && document.visibilityState) ? document.visibilityState : "unknown";
+          let focused = "unknown";
+          try { focused = document.hasFocus() ? "focused" : "not-focused"; } catch (_) {}
+          const online = (typeof navigator !== "undefined" && typeof navigator.onLine === "boolean") ? (navigator.onLine ? "online" : "offline") : "unknown";
+          const prevDur = h.refreshDurationsMs && h.refreshDurationsMs.length ? h.refreshDurationsMs[h.refreshDurationsMs.length - 1] : null;
+          if (!Array.isArray(h.cadenceGapDiagnostics)) h.cadenceGapDiagnostics = [];
+          h.cadenceGapDiagnostics.push({
+            at: cycleStart,
+            previousStartAt: h.lastCycleStartedAt,
+            gapMs: gap,
+            excessMs: Math.max(0, gap - EXPECTED_CADENCE_MS),
+            missedTicks: missed,
+            visibility,
+            focus: focused,
+            online,
+            previousRefreshMs: Number.isFinite(prevDur) ? prevDur : null,
+            longGap: gap >= 120000,
+          });
+          if (h.cadenceGapDiagnostics.length > 200) h.cadenceGapDiagnostics = h.cadenceGapDiagnostics.slice(-200);
+          if (!h.cadenceGapByVisibility || typeof h.cadenceGapByVisibility !== "object") h.cadenceGapByVisibility = {};
+          if (!h.cadenceGapByFocus || typeof h.cadenceGapByFocus !== "object") h.cadenceGapByFocus = {};
+          if (!h.cadenceGapByOnline || typeof h.cadenceGapByOnline !== "object") h.cadenceGapByOnline = {};
+          h.cadenceGapByVisibility[visibility] = (h.cadenceGapByVisibility[visibility] || 0) + 1;
+          h.cadenceGapByFocus[focused] = (h.cadenceGapByFocus[focused] || 0) + 1;
+          h.cadenceGapByOnline[online] = (h.cadenceGapByOnline[online] || 0) + 1;
         }
       }
       h.lastCycleStartedAt = cycleStart;
@@ -5854,7 +6151,18 @@ function scoreDirectionBreakdown(s, dir) {
   }
   score += fundPts;
   const total = Math.round(Math.min(score / 1.1, 100));
-  return { total, trendPts, momentumPts: Math.min(momPts, 30), structurePts: structPts, tradeabilityPts: tradePts, fundingPts: fundPts, subchecks };
+
+  // v43.11 research-only de-correlated score. The live scanner score above is
+  // unchanged. This alternate view deliberately treats SMA10/30 + price/SMA96
+  // + price/SMA192 as ONE trend family instead of three independent votes.
+  // Two or three aligned trend checks receive the same composite weight so a
+  // highly correlated long-MA pair cannot add extra confidence merely by
+  // repeating the same underlying trend information.
+  const trendAlignedCount = [subchecks.sma10_30Aligned, subchecks.priceVsSma96Aligned, subchecks.priceVsSma192Aligned].filter(Boolean).length;
+  const researchTrendCompositePts = trendAlignedCount >= 2 ? 40 : trendAlignedCount === 1 ? 20 : 0;
+  const researchRaw = researchTrendCompositePts + Math.min(momPts, 30) + structPts + tradePts + fundPts;
+  const researchDecorrelatedTotal = Math.round(Math.min(researchRaw / 1.1, 100));
+  return { total, researchDecorrelatedTotal, researchTrendCompositePts, trendAlignedCount, trendPts, momentumPts: Math.min(momPts, 30), structurePts: structPts, tradeabilityPts: tradePts, fundingPts: fundPts, subchecks };
 }
 function scoreDirection(s, dir) {
   return scoreDirectionBreakdown(s, dir).total;
@@ -6092,6 +6400,13 @@ document.getElementById("reportCloseBtn").addEventListener("click", closeReport)
 document.getElementById("downloadReportBtn").addEventListener("click", downloadReport);
 document.getElementById("wideScanBtn").addEventListener("click", runWideScan);
 const autoTrackControl = document.getElementById("autoTrackOn");
+const benchmarkLockControl = document.getElementById("benchmarkLockOn");
+// v43.11 fresh-load defaults. Browser form-state restoration can otherwise
+// resurrect an old checkbox state even when there is no active engine.
+if (!engine) {
+  if (autoTrackControl) autoTrackControl.checked = false;
+  if (benchmarkLockControl) benchmarkLockControl.checked = true;
+}
 if (autoTrackControl) autoTrackControl.addEventListener("change", () => {
   if (engine && engine.benchmarkLock && autoTrackControl.checked) {
     autoTrackControl.checked = false;
