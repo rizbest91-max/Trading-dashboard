@@ -282,6 +282,8 @@
     <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;" id="sec-research">
       <button id="genReportBtn">Generate report</button>
       <button id="downloadReportBtn">Download report (.txt)</button>
+      <button id="downloadResearchJsonBtn">Download research (.json)</button>
+      <button id="downloadResearchCsvBtn">Download records (.csv)</button>
     </div>
     <div id="reportContainer" style="display:none; margin-top:10px;">
       <div class="report-head">
@@ -338,7 +340,7 @@
   <div class="grid" id="cardGrid"></div>
 
   <div class="footnote" style="text-align:center;">
-    <span style="font-family:monospace; color:#4a5568; font-size:11px;">Build v43.11</span> · Full version history moved to the Excel research register — this footer no longer duplicates it.<br/>
+    <span style="font-family:monospace; color:#4a5568; font-size:11px;">Build v43.12</span> · Full version history moved to the Excel research register — this footer no longer duplicates it.<br/>
     Assumption recorded: £/$ treated as 1:1 since prices come from USDT pairs — no live FX conversion applied. Fees assumed at 0.1% per side, no funding cost modeled. Each strategy's pot per coin is fully isolated — a loss in one never affects another. Data saved only in this browser. Price/execution simulation uses Binance SPOT candles throughout; the funding-rate signal (used by Funding+Momentum and the scanner) is pulled from the separate PERPETUAL FUTURES market as a sentiment proxy only — no funding payments are simulated or applied to any P&L. Spot and futures prices can differ, so this is a proxy signal, not a futures execution model.
   </div>
 </div>
@@ -348,11 +350,23 @@
 // can actually work on them). More coins = more signals = a usable sample size
 // sooner. The exposure cap keeps total risk in check, so a wider list gives the
 // system more to choose from rather than more to pile into.
-const BUILD_TAG = "v43.11 · 2026-09-18 (research reliability + cadence diagnostics + evidence compaction)";
-const BUILD_PARENT_SHA256 = "85d30dc637835a0fe5b805b0ad973d4f0d0224cc16b6b6db6ba4940d8ca1e69d";
-const BUILD_PARENT_MD5 = "bf9aa0396eb61aa194e48923015da551";
-const V439_INSTRUMENTATION_VERSION = "v43.11-r1"; // variable name kept for minimal diff churn; value bumped so a genuine v43.11 run reports its own version and older saves report MISMATCH / OLD RUN
-const V4311_CHANGE_LOG = [
+const BUILD_TAG = "v43.12 · 2026-09-20 (provenance guard + evidence governor + structured research export)";
+const BUILD_PARENT_LABEL = "v43.11";
+const BUILD_PARENT_SHA256 = "d91907f33482bc6a808d8158f2446b98e017ed0b1af8d81bee8a50613660e986";
+const BUILD_PARENT_MD5 = "b642f49c564b7edc1259f359c7c1f215";
+const BUILD_APPROVED_PARENT_RECORD = "v43_12_APPROVED_PARENT.json";
+const V439_INSTRUMENTATION_VERSION = "v43.12-r1"; // variable name retained to minimize unrelated diff churn
+const V4312_CHANGE_LOG = [
+  ["P0", "External approved-parent ancestry guard", "IMPLEMENTED", "Prevent building from a correctly-hashed but superseded parent", "Build must match the separately maintained approved-parent record before patching", "v43.12 build script hard-fails unless exact v43.11 bytes/MD5/SHA256/line count match external record", "PASS", "BUILD-VERIFIED"],
+  ["P0", "Restore corrected-r2 storage ownership semantics", "IMPLEMENTED", "v43.11 inherited the superseded r2 draft and re-counted stale legacy keys", "Only dashboard-current active keys drive the 3.50MB research ceiling; stale keys remain diagnostic only", "estimateDashboardCurrentBytes restored; stale-legacy excluded from the halt basis", "PASS", "SOURCE-VERIFIED"],
+  ["P0", "Research Evidence Governor", "IMPLEMENTED RESEARCH-ONLY", "Keep cadence-contaminated evidence separate instead of poisoning one pooled run", ">90s gaps close a continuity segment; records crossing a gap are tagged contaminated", "Segment IDs + explicit boundaries + gap rows + per-segment real-entry counts added", "PENDING RUNTIME", "CODE-VERIFIED"],
+  ["P0", "Event-time versus processing-time provenance", "IMPLEMENTED", "Historical reconciliation timestamps were mistaken for live engine activity", "Closed trades/shadows and cadence gaps expose economic/event time separately from processing/detection time", "eventAt/processedAt + recovered-after-gap metadata added; no P/L logic changed", "PENDING RUNTIME", "CODE-VERIFIED"],
+  ["P0", "Lifecycle cadence telemetry", "IMPLEMENTED", "Visibility/focus state sampled only after a gap could not prove the transition sequence", "Bounded visibility/focus/blur/pagehide/pageshow/online/offline events persist with timestamps and segment ID", "Lifecycle event recorder installed; bounded to 200 rows", "PENDING RUNTIME", "CODE-VERIFIED"],
+  ["P0", "Shadow-cap preflight compaction + peak diagnostics", "IMPLEMENTED RESEARCH RELIABILITY", "Preflight could judge capacity before the save-path compaction that would immediately follow", "Compact resolved evidence before candidate capacity projection and retain peak/first-skip forensic counters", "No signal/trade rule change; candidate research sampling gets a post-compaction capacity basis", "PENDING RUNTIME", "CODE-VERIFIED"],
+  ["P1", "Machine-readable research export", "IMPLEMENTED", "Independent review should not regex-parse free-text reports", "Export JSON snapshot and normalized CSV records for trades/shadows/vetoes", "Two explicit download buttons added; export includes governor, health and cumulative research aggregates", "PASS", "CODE-VERIFIED"],
+  ["P1", "Strategy-independence entry-overlap map", "IMPLEMENTED REPORT-ONLY", "Same-coin duplicate thesis needs pairwise decomposition", "Report pairwise participant-trade outcomes without changing allocation", "Derived from existing sameCoinSameSideOtherBots data; no new trading state", "PENDING SAMPLE", "CODE-VERIFIED"],
+  ["P1", "Protective-exit expectancy summary", "IMPLEMENTED RESEARCH-ONLY", "Would-win counts can disagree with actual dollar expectancy", "Persist exact-once actual-vs-hold aggregate delta and unique market-event count by protective exit type", "Cumulative continuation statistics added; live exits unchanged", "PENDING SAMPLE", "CODE-VERIFIED"],
+  ["P1", "Bollinger permission-volume outcome bins", "IMPLEMENTED RESEARCH-ONLY", "v43.11 showed the permission-volume stage was the bottleneck but lacked outcome-by-volume evidence", "Fold resolved Bollinger volume-stage shadows into <0.5/0.5-0.79/0.8-0.89/0.9-0.99/>=1.0 bins", "Closed-candle permission failure stage + volRatio now retained in shadow research metadata", "PENDING SAMPLE", "CODE-VERIFIED"],
   ["P0", "Resolved-shadow compaction hardening", "IMPLEMENTED", "Extend storage runway without dropping unresolved evidence", "Lower ongoing resolved-detail growth", "Runtime runway improvement requires a fresh v43.11 run", "PENDING RUNTIME", "CODE-VERIFIED"],
   ["P0", "Cadence gap root-cause telemetry", "IMPLEMENTED", "Replace Safari/background-throttling guesses with incident evidence", "Classify delayed cycles by visibility/focus/network/prior refresh", "Runtime cause requires a fresh overnight run", "PENDING RUNTIME", "CODE-VERIFIED"],
   ["P1", "Regime raw-vs-confirmed semantics audit", "RESOLVED/EXPLAINED", "Explain confirmed-change counts that can exceed raw changes", "Reconstruct transition semantics and surface component counts", "Source shows raw change -> confirmed mixed -> confirmed new state can create two confirmed transitions", "PASS", "SOURCE-VERIFIED"],
@@ -431,6 +445,18 @@ function couldCoarseCandleTouch(isLong, hi, lo, stop, target) {
 // one implementation of "what happens when a shadow resolves" — not several
 // independent copies that can drift out of sync with each other.
 function finalizeShadowResolution(st, engine) {
+  // v43.12: separate the historical market event from when the browser
+  // actually processed/committed the resolution. Also tag evidence that
+  // crossed a >90s continuity segment boundary.
+  if (st && st.status === "resolved") {
+    if (!Number.isFinite(st.processedAt)) st.processedAt = Date.now();
+    if (!Number.isFinite(st.eventAt)) st.eventAt = Number.isFinite(st.resolvedAt) ? st.resolvedAt : st.processedAt;
+    if (!Number.isFinite(st.continuitySegmentIdAtResolution)) st.continuitySegmentIdAtResolution = currentEvidenceSegmentId();
+    st.cadenceContaminated = Number.isFinite(st.continuitySegmentIdAtEntry) && Number.isFinite(st.continuitySegmentIdAtResolution) && st.continuitySegmentIdAtEntry !== st.continuitySegmentIdAtResolution;
+    const rec = gapRecoveryInfo(st.eventAt, st.processedAt);
+    st.recoveredAfterCadenceGap = !!rec.recoveredAfterCadenceGap;
+    st.cadenceGapId = rec.cadenceGapId;
+  }
   // v39 fix: applied here, once, regardless of which resolution path fired
   // — a shadow flagged openingUncertain carries that uncertainty into
   // whatever it eventually resolved to, same as real positions.
@@ -558,6 +584,31 @@ function finalizeShadowResolution(st, engine) {
       else if (st.resolution === "ambiguous") rs.ambiguous++;
       else rs.timeouts++;
       if (st.hypotheticalPnl !== undefined && st.resolution !== "ambiguous") { rs.hypNetSum += st.hypotheticalPnl; rs.hypNetCount++; }
+
+      // v43.12: exact-once protective-exit expectancy, not just would-win counts.
+      if ((st.vetoType === "early_exit_continuation" || st.vetoType === "regime_flip_continuation") && st.resolution !== "ambiguous" && Number.isFinite(st.actualPnl) && Number.isFinite(st.hypotheticalPnl)) {
+        if (!engine.protectiveExitOutcomeStats) engine.protectiveExitOutcomeStats = {};
+        if (!engine.protectiveExitOutcomeStats[st.vetoType]) engine.protectiveExitOutcomeStats[st.vetoType] = { n:0, actualNetSum:0, hypotheticalNetSum:0, deltaActualMinusHoldSum:0, goodSave:0, missedWinner:0, neutral:0, uniqueEventKeys:{} };
+        const ps = engine.protectiveExitOutcomeStats[st.vetoType];
+        ps.n++; ps.actualNetSum += st.actualPnl; ps.hypotheticalNetSum += st.hypotheticalPnl; ps.deltaActualMinusHoldSum += (st.actualPnl - st.hypotheticalPnl);
+        if (st.classification === "GOOD_SAVE") ps.goodSave++; else if (st.classification === "MISSED_WINNER") ps.missedWinner++; else ps.neutral++;
+        const ek = `${st.coin}|${st.side}|${Number.isFinite(st.resolvedAt)?st.resolvedAt:"na"}`;
+        if (!ps.uniqueEventKeys) ps.uniqueEventKeys = {};
+        ps.uniqueEventKeys[ek] = true;
+      }
+
+      // v43.12: Bollinger closed permission-volume outcome bins. This is
+      // research-only and is folded under the same exact-once shadow journal.
+      if (st.bot === "boll" && st.meanReversionFailureStage === "permission_volume" && Number.isFinite(st.vetoVolRatio)) {
+        if (!engine.bollingerPermissionVolumeOutcomeStats) engine.bollingerPermissionVolumeOutcomeStats = {};
+        const v = st.vetoVolRatio;
+        const bin = v < 0.5 ? "<0.50" : v < 0.8 ? "0.50-0.79" : v < 0.9 ? "0.80-0.89" : v < 1.0 ? "0.90-0.99" : ">=1.00";
+        if (!engine.bollingerPermissionVolumeOutcomeStats[bin]) engine.bollingerPermissionVolumeOutcomeStats[bin] = { n:0, wins:0, losses:0, timeouts:0, ambiguous:0, hypNetSum:0, hypNetCount:0 };
+        const bs = engine.bollingerPermissionVolumeOutcomeStats[bin];
+        bs.n++;
+        if (st.resolution === "would_win") bs.wins++; else if (st.resolution === "would_lose") bs.losses++; else if (st.resolution === "ambiguous") bs.ambiguous++; else bs.timeouts++;
+        if (Number.isFinite(st.hypotheticalPnl) && st.resolution !== "ambiguous") { bs.hypNetSum += st.hypotheticalPnl; bs.hypNetCount++; }
+      }
     }
   }
 }
@@ -793,7 +844,7 @@ function saveToggles() { safeLocalStorageSet(LS_TOGGLES, JSON.stringify(toggles)
 // genuine shadows were skipped when the dashboard's own explicitly-itemized
 // components summed to only ~0.64MB, while origin-wide storage read 4.45MB —
 // the halt fired because of data this app does not own and cannot control.
-// Fix: the ceiling/halt now uses ONLY dashboard-owned bytes (this app's own
+// Fix: the ceiling/halt now uses ONLY dashboard-current bytes (this app's own
 // tm2_-prefixed keys). Origin-wide storage is still measured and reported
 // separately, since real browser-quota exhaustion is genuinely origin-wide —
 // it becomes a warning, not the halt trigger. A per-key classification table
@@ -804,7 +855,7 @@ function saveToggles() { safeLocalStorageSet(LS_TOGGLES, JSON.stringify(toggles)
 // deliberately left unchanged so a page reload mid-run does not trigger a
 // build-mismatch against an already-started v43.10 session. Track this
 // patch's own identity separately:
-const STORAGE_ACCOUNTING_REVISION = "v43.11 (dashboard-owned storage + resolved-evidence compaction hardening)";
+const STORAGE_ACCOUNTING_REVISION = "v43.12 (dashboard-current vs whole-origin split; stale-legacy diagnostic only; post-compaction shadow preflight)";
 const DASHBOARD_KEY_PREFIX = "tm2_";
 // Every key this exact build actively reads/writes. Any OTHER tm2_-prefixed
 // key found in localStorage is still this app's own data (a prior version
@@ -831,14 +882,17 @@ function classifyStorageKey(key) {
   }
   return "unknown/other";
 }
-// Dashboard-owned bytes ONLY — this is what the 3.50MB ceiling and the
-// shadow-sampling halt are now based on, not the whole origin.
-function estimateDashboardOwnedBytes() {
+// v43.12 provenance repair: restore the corrected-final-r2 semantics that
+// v43.11 accidentally lost by being built from the superseded r2 draft.
+// ONLY active dashboard-current keys drive this run's 3.50MB research ceiling.
+// Stale tm2_ legacy keys remain visible in the per-key diagnostic table but
+// cannot falsely halt collection for a build that never reads them.
+function estimateDashboardCurrentBytes() {
   let total = 0;
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
     const cls = classifyStorageKey(key);
-    if (cls !== "dashboard-current" && cls !== "dashboard-stale-legacy") continue;
+    if (cls !== "dashboard-current") continue;
     const val = localStorage.getItem(key);
     if (val) total += (key.length + val.length) * 2;
   }
@@ -873,7 +927,7 @@ function estimateLocalStorageBytes() {
 // the authoritative persistence-degraded fail-stop.
 const RESEARCH_STORAGE_SOFT_CEILING_BYTES = Math.floor(3.5 * 1024 * 1024);
 function projectedStorageBytesWithEngine() {
-  // v43.10-r2 fix: this now measures DASHBOARD-OWNED bytes only, not the
+  // v43.10-r2 fix: this now measures DASHBOARD-CURRENT bytes only, not the
   // whole browser origin. Same subtract-old/add-projected-new logic as
   // before — only the base measurement changed. See STORAGE_ACCOUNTING_REVISION
   // above for why: origin-wide storage previously caused a false halt when
@@ -881,7 +935,7 @@ function projectedStorageBytesWithEngine() {
   // from a prior version) pushed the origin total over the ceiling despite
   // this app's own data being far below it.
   let current = 0;
-  try { current = estimateDashboardOwnedBytes(); } catch (_) { return Infinity; }
+  try { current = estimateDashboardCurrentBytes(); } catch (_) { return Infinity; }
   let oldEngine = "";
   try { oldEngine = localStorage.getItem(LS_ENGINE) || ""; } catch (_) { return Infinity; }
   let projected = "";
@@ -1156,6 +1210,120 @@ function recordRefreshDuration(ms) {
   if (!h) return;
   h.refreshDurationsMs.push(ms);
   if (h.refreshDurationsMs.length > 200) h.refreshDurationsMs = h.refreshDurationsMs.slice(-200); // bounded, recent-run average is what matters
+}
+
+
+// v43.12 Research Evidence Governor. Research segmentation only; never grants,
+// blocks, resizes or exits a trade. A >90s cadence gap creates a new continuity
+// segment so clean and gap-contaminated evidence can be reported separately.
+const EVIDENCE_GAP_SEGMENT_MS = 90000;
+function ensureEvidenceGovernor() {
+  if (!engine) return null;
+  if (!engine.evidenceGovernor || typeof engine.evidenceGovernor !== "object") {
+    const start = Number.isFinite(engine.startedAt) ? engine.startedAt : Date.now();
+    engine.evidenceGovernor = {
+      version: "v43.12-r1", gapThresholdMs: EVIDENCE_GAP_SEGMENT_MS,
+      currentSegmentId: 1, nextGapId: 1,
+      initializedFromLegacy: engine.startBuildTag !== BUILD_TAG,
+      segments: [{ id: 1, startAt: start, endAt: null, endReason: null, trigger: "run_start", gapBeforeId: null, realEntries: 0 }],
+      gaps: []
+    };
+  }
+  const g = engine.evidenceGovernor;
+  if (!Array.isArray(g.segments) || !g.segments.length) g.segments = [{ id: 1, startAt: engine.startedAt || Date.now(), endAt: null, endReason: null, trigger: "repair", gapBeforeId: null, realEntries: 0 }];
+  if (!Array.isArray(g.gaps)) g.gaps = [];
+  if (!Number.isFinite(g.currentSegmentId)) g.currentSegmentId = g.segments[g.segments.length - 1].id || 1;
+  if (!Number.isFinite(g.nextGapId)) g.nextGapId = (g.gaps.reduce((m,x)=>Math.max(m,Number(x.id)||0),0) || 0) + 1;
+  if (!Number.isFinite(g.gapThresholdMs)) g.gapThresholdMs = EVIDENCE_GAP_SEGMENT_MS;
+  return g;
+}
+function currentEvidenceSegmentId() {
+  const g = ensureEvidenceGovernor();
+  return g ? g.currentSegmentId : null;
+}
+function markEvidenceRealEntry(segmentId) {
+  const g = ensureEvidenceGovernor();
+  if (!g || !Number.isFinite(segmentId)) return;
+  const seg = g.segments.find(x => x.id === segmentId);
+  if (seg) seg.realEntries = (seg.realEntries || 0) + 1;
+}
+function recordEvidenceCadenceGap(previousStartAt, resumedAt, gapMs, missedTicks, context) {
+  const g = ensureEvidenceGovernor();
+  if (!g || !(gapMs > g.gapThresholdMs)) return null;
+  const gapId = g.nextGapId++;
+  const priorSegmentId = g.currentSegmentId;
+  const prior = g.segments.find(x => x.id === priorSegmentId);
+  if (prior && prior.endAt == null) {
+    prior.endAt = previousStartAt;
+    prior.endReason = `cadence_gap_${gapId}`;
+  }
+  const nextSegmentId = Math.max(0, ...g.segments.map(x => Number(x.id) || 0)) + 1;
+  const gapBeganAt = previousStartAt + REFRESH_MS;
+  const row = {
+    id: gapId,
+    eventAt: gapBeganAt,
+    eventAtQuality: "inferred_first_missed_30s_tick",
+    processedAt: resumedAt,
+    previousStartAt,
+    resumedAt,
+    gapMs,
+    missedTicks: missedTicks || 0,
+    priorSegmentId,
+    nextSegmentId,
+    visibility: context && context.visibility || "unknown",
+    focus: context && context.focus || "unknown",
+    online: context && context.online || "unknown"
+  };
+  g.gaps.push(row);
+  if (g.gaps.length > 200) g.gaps = g.gaps.slice(-200);
+  g.currentSegmentId = nextSegmentId;
+  g.segments.push({ id: nextSegmentId, startAt: resumedAt, endAt: null, endReason: null, trigger: "cadence_recovery", gapBeforeId: gapId, realEntries: 0 });
+  if (g.segments.length > 201) g.segments = g.segments.slice(-201);
+  return row;
+}
+function gapRecoveryInfo(eventAt, processedAt) {
+  const g = ensureEvidenceGovernor();
+  if (!g || !Number.isFinite(eventAt) || !Number.isFinite(processedAt)) return { recoveredAfterCadenceGap: false, cadenceGapId: null };
+  for (let i = g.gaps.length - 1; i >= 0; i--) {
+    const x = g.gaps[i];
+    if (eventAt > x.previousStartAt && eventAt <= x.resumedAt && processedAt >= x.resumedAt) {
+      return { recoveredAfterCadenceGap: true, cadenceGapId: x.id };
+    }
+  }
+  return { recoveredAfterCadenceGap: false, cadenceGapId: null };
+}
+function lifecycleSnapshot(type, at) {
+  const eventAt = Number.isFinite(at) ? at : Date.now();
+  let focus = "unknown";
+  try { focus = document.hasFocus() ? "focused" : "not-focused"; } catch (_) {}
+  return {
+    type, eventAt, processedAt: Date.now(),
+    segmentId: currentEvidenceSegmentId(),
+    visibility: (typeof document !== "undefined" && document.visibilityState) ? document.visibilityState : "unknown",
+    focus,
+    online: (typeof navigator !== "undefined" && typeof navigator.onLine === "boolean") ? (navigator.onLine ? "online" : "offline") : "unknown"
+  };
+}
+function recordLifecycleEvent(type, at) {
+  if (!engine) return;
+  if (!Array.isArray(engine.lifecycleEvents)) engine.lifecycleEvents = [];
+  engine.lifecycleEvents.push(lifecycleSnapshot(type, at));
+  if (engine.lifecycleEvents.length > 200) engine.lifecycleEvents = engine.lifecycleEvents.slice(-200);
+  // Avoid persisting an intermediate engine snapshot if a refresh is actively
+  // mutating state; that refresh will commit the lifecycle row at its normal
+  // atomic save boundary.
+  if (typeof refreshInProgress === "undefined" || !refreshInProgress) saveEngine();
+}
+function ensureStorageCapacityDiagnostics() {
+  if (!engine) return null;
+  if (!engine.storageCapacityDiagnostics || typeof engine.storageCapacityDiagnostics !== "object") {
+    engine.storageCapacityDiagnostics = {
+      preflightCompactionRuns: 0, preflightCompactionSavedBytes: 0, maxPreflightCompactionSavedBytes: 0,
+      peakProjectedBytes: 0, peakCurrentBytes: 0, peakAt: null,
+      skipEvents: 0, firstSkip: null
+    };
+  }
+  return engine.storageCapacityDiagnostics;
 }
 
 // v41.2 fix (A8): wide-scanner and research-only coin fetches were sharing
@@ -1848,6 +2016,14 @@ function startEngine() {
     targetCapEventRegistry: {},
     _shadowTotalsMigratedV43: true, storageSoftCeilingBytes: RESEARCH_STORAGE_SOFT_CEILING_BYTES
   };
+  newEngine.evidenceGovernor = {
+    version: "v43.12-r1", gapThresholdMs: EVIDENCE_GAP_SEGMENT_MS, currentSegmentId: 1, nextGapId: 1, initializedFromLegacy: false,
+    segments: [{ id: 1, startAt: newEngine.startedAt, endAt: null, endReason: null, trigger: "run_start", gapBeforeId: null, realEntries: 0 }], gaps: []
+  };
+  newEngine.lifecycleEvents = [];
+  newEngine.storageCapacityDiagnostics = { preflightCompactionRuns: 0, preflightCompactionSavedBytes: 0, maxPreflightCompactionSavedBytes: 0, peakProjectedBytes: 0, peakCurrentBytes: 0, peakAt: null, skipEvents: 0, firstSkip: null };
+  newEngine.protectiveExitOutcomeStats = {};
+  newEngine.bollingerPermissionVolumeOutcomeStats = {};
   // v43.5 B0-02: persist + verify the COMPLETE fresh baseline BEFORE adopting
   // it in memory or clearing the old run's research. A successful tiny probe
   // alone is not enough evidence that the actual engine payload fits/writes.
@@ -2830,6 +3006,13 @@ async function runEngineStep() {
         const hypNotionalFromRiskCap = hypStopDistPct ? (acc.cash * 0.20) / hypStopDistPct : hypNotionalFromLeverage;
         const hypNotional = Math.min(hypNotionalFromLeverage, hypNotionalFromRiskCap);
 
+        // v43.12: decision-scoped closed-candle mean-reversion diagnostics.
+        // Populated only when RSI/Bollinger reaches that gate, then copied into
+        // the shadow research metadata so structured exports can distinguish
+        // which sub-stage actually blocked the candidate.
+        let meanReversionFailureStage = null;
+        let meanReversionClosedVolRatio = null;
+
         // Shared logger: call at every rejection point with the specific
         // veto type + reason. Records both the counter (existing v28 system)
         // and a trackable shadow position (new).
@@ -2882,7 +3065,8 @@ async function runEngineStep() {
             decisionCycleId, originalTarget: hypOriginalTarget, cappedTarget: hypTarget, capApplied: hypCapApplied, vetoAttribution,
             vetoRegimeBucket, vetoStableRegime, vetoClosedRocPct: vetoRoc,
             vetoAtrPct: Number.isFinite(s.atrPct) ? s.atrPct : null,
-            vetoVolRatio: Number.isFinite(s.volRatio) ? s.volRatio : null,
+            vetoVolRatio: Number.isFinite(meanReversionClosedVolRatio) ? meanReversionClosedVolRatio : (Number.isFinite(s.volRatio) ? s.volRatio : null),
+            meanReversionFailureStage,
           };
           if (!addShadowTrade(bot.key, coin, side, hypEntry, hypStop, hypTarget, reason, vetoType, null, hypNotional, engine.feePct, undefined,
               { vetoType, bot: bot.key, coin, reason }, researchMeta)) {
@@ -3000,6 +3184,8 @@ async function runEngineStep() {
           if (bot.key === "boll") { bumpBollFunnel("reachedClosedMeanReversionEval", side, true); markBollingerEpisodeStage(coin, side, "closed_mean_reversion_eval", true); }
           const closedPermissionState = regimeIntegrityModeActive ? closedMeanReversionState(s) : s;
           const permission = checkMeanReversionPermission(closedPermissionState || s, side);
+          meanReversionFailureStage = permission && permission.failedStage ? permission.failedStage : null;
+          meanReversionClosedVolRatio = closedPermissionState && Number.isFinite(closedPermissionState.volRatio) ? closedPermissionState.volRatio : null;
           if (bot.key === "boll" && permission && permission.checks) {
             const stageMap = [["range","permission_range"],["exhaustion","permission_exhaustion"],["structure","permission_structure"],["permissionVolume","permission_volume"]];
             stageMap.forEach(([k,stage]) => { if (permission.checks[k] !== undefined) markBollingerEpisodeStage(coin, side, stage, !!permission.checks[k]); });
@@ -3373,6 +3559,9 @@ async function runEngineStep() {
         }));
 
         acc.cash -= margin;
+        const positionOpenedAt = Date.now();
+        const continuitySegmentIdAtEntry = currentEvidenceSegmentId();
+        markEvidenceRealEntry(continuitySegmentIdAtEntry);
         if (bot.key === "rsi" || bot.key === "boll") {
           if (engine.reversalConfirm) engine.reversalConfirm[`${bot.key}_${coin}_${side}`] = { count: 0, lastCandleTime: null };
         }
@@ -3385,7 +3574,8 @@ async function runEngineStep() {
           // remaining time, not a fresh full window off whatever the max-
           // hold setting happens to be at that later moment.
           maxHoldMs: (engine.maxHoldHours || 24) * 3600000,
-          riskReward: rr, reason: reasonText, openedAt: Date.now(),
+          riskReward: rr, reason: reasonText, openedAt: positionOpenedAt,
+          continuitySegmentIdAtEntry, cadenceCleanAtEntry: true,
           concurrentOpen, concurrentLong, concurrentShort, entrySnapshot, sameCoinSameSideOtherBots,
           globalSameDirectionOpenAtEntry: globalSameDirectionOpen,
           recentSameDirection20mAtEntry: recentSameDirection20m,
@@ -3439,7 +3629,7 @@ function recordVeto(vetoType, bot, coin, reason, deferPersist = false) {
   engine.vetoTotals[vetoType].n++;
   engine.vetoTotals[vetoType].byBot[bot] = (engine.vetoTotals[vetoType].byBot[bot] || 0) + 1;
   engine.vetoTotals[vetoType].byCoin[coin] = (engine.vetoTotals[vetoType].byCoin[coin] || 0) + 1;
-  vetoLog.unshift({ t: Date.now(), type: vetoType, bot, coin, reason });
+  vetoLog.unshift({ t: Date.now(), type: vetoType, bot, coin, reason, continuitySegmentId: currentEvidenceSegmentId() });
   vetoLog = vetoLog.slice(0, 500);
   engine.vetoLog = vetoLog;
   if (deferPersist) return { ok: true, previousTotals, previousVetoLog };
@@ -3567,6 +3757,13 @@ function compactShadowRecord(st) {
     pairedResearchOnly: !!st.pairedResearchOnly, decisionCycleId: st.decisionCycleId || null,
     vetoAttribution: st.vetoAttribution || null,
     vetoRegimeBucket: st.vetoRegimeBucket || null,
+    vetoVolRatio: Number.isFinite(st.vetoVolRatio) ? st.vetoVolRatio : null,
+    meanReversionFailureStage: st.meanReversionFailureStage || null,
+    eventAt: Number.isFinite(st.eventAt) ? st.eventAt : (Number.isFinite(st.resolvedAt) ? st.resolvedAt : null),
+    processedAt: Number.isFinite(st.processedAt) ? st.processedAt : null,
+    continuitySegmentIdAtEntry: Number.isFinite(st.continuitySegmentIdAtEntry) ? st.continuitySegmentIdAtEntry : null,
+    continuitySegmentIdAtResolution: Number.isFinite(st.continuitySegmentIdAtResolution) ? st.continuitySegmentIdAtResolution : null,
+    cadenceContaminated: !!st.cadenceContaminated, recoveredAfterCadenceGap: !!st.recoveredAfterCadenceGap, cadenceGapId: st.cadenceGapId || null,
     counted: true, compacted: true,
   };
 }
@@ -3858,6 +4055,26 @@ function addShadowTrade(botKey, coin, side, entry, stop, target, reason, vetoTyp
     return false;
   }
   if (capacityHealth) capacityHealth.shadowCreationCurrentlyPaused = false;
+
+  // v43.12: the actual save path compacts resolved evidence before writing.
+  // Do the same BEFORE candidate capacity projection so the soft-ceiling
+  // decision is based on the payload that would really be persisted, not a
+  // temporarily verbose pre-compaction representation. Trading decisions are
+  // unchanged; this only prevents avoidable research-sample loss.
+  const capDiag = ensureStorageCapacityDiagnostics();
+  let preCompactBytes = null, postCompactBytes = null;
+  try { preCompactBytes = projectedStorageBytesWithEngine(); } catch (_) {}
+  runShadowCompactionSweep(engine);
+  engine.shadowTrades = shadowTrades; engine.continuationShadows = continuationShadows; engine.vetoLog = vetoLog; engine.engineEvents = engineEvents;
+  try { postCompactBytes = projectedStorageBytesWithEngine(); } catch (_) {}
+  if (capDiag) {
+    capDiag.preflightCompactionRuns = (capDiag.preflightCompactionRuns || 0) + 1;
+    if (Number.isFinite(preCompactBytes) && Number.isFinite(postCompactBytes)) {
+      const saved = Math.max(0, preCompactBytes - postCompactBytes);
+      capDiag.preflightCompactionSavedBytes = (capDiag.preflightCompactionSavedBytes || 0) + saved;
+      capDiag.maxPreflightCompactionSavedBytes = Math.max(capDiag.maxPreflightCompactionSavedBytes || 0, saved);
+    }
+  }
   // P1-5 fix: shadowSummary()'s "total" previously came from the LIVE,
   // capped array length, while "resolved" came from the genuinely
   // cumulative engine.shadowTotals — after enough resolutions that old
@@ -3891,6 +4108,8 @@ function addShadowTrade(botKey, coin, side, entry, stop, target, reason, vetoTyp
     vetoClosedRocPct: researchMeta && Number.isFinite(researchMeta.vetoClosedRocPct) ? researchMeta.vetoClosedRocPct : null,
     vetoAtrPct: researchMeta && Number.isFinite(researchMeta.vetoAtrPct) ? researchMeta.vetoAtrPct : null,
     vetoVolRatio: researchMeta && Number.isFinite(researchMeta.vetoVolRatio) ? researchMeta.vetoVolRatio : null,
+    meanReversionFailureStage: researchMeta && researchMeta.meanReversionFailureStage ? researchMeta.meanReversionFailureStage : null,
+    continuitySegmentIdAtEntry: currentEvidenceSegmentId(), cadenceCleanAtEntry: true,
     pairedResearchOnly: !!(researchMeta && researchMeta.pairedResearchOnly),
     dedupEventKey: dedupMeta.eventKey, eventRepresentative: !!dedupMeta.isRepresentative,
   };
@@ -3942,7 +4161,20 @@ function addShadowTrade(botKey, coin, side, entry, stop, target, reason, vetoTyp
   // Pre-flight the actual combined authoritative payload, including a paired
   // veto when present. Conservative application ceiling, not a browser quota claim.
   const softCeiling = Number.isFinite(engine.storageSoftCeilingBytes) ? engine.storageSoftCeilingBytes : RESEARCH_STORAGE_SOFT_CEILING_BYTES;
-  if (projectedStorageBytesWithEngine() >= softCeiling) {
+  const projectedCapacityBytes = projectedStorageBytesWithEngine();
+  if (capDiag) {
+    let currentBytes = null; try { currentBytes = estimateDashboardCurrentBytes(); } catch (_) {}
+    if (Number.isFinite(projectedCapacityBytes) && projectedCapacityBytes >= (capDiag.peakProjectedBytes || 0)) { capDiag.peakProjectedBytes = projectedCapacityBytes; capDiag.peakAt = Date.now(); }
+    if (Number.isFinite(currentBytes)) capDiag.peakCurrentBytes = Math.max(capDiag.peakCurrentBytes || 0, currentBytes);
+  }
+  if (projectedCapacityBytes >= softCeiling) {
+    if (capDiag) {
+      capDiag.skipEvents = (capDiag.skipEvents || 0) + 1;
+      if (!capDiag.firstSkip) {
+        let currentBytes = null; try { currentBytes = estimateDashboardCurrentBytes(); } catch (_) {}
+        capDiag.firstSkip = { at: Date.now(), projectedBytes: projectedCapacityBytes, currentBytes, softCeilingBytes: softCeiling, vetoType, bot: botKey, coin, pendingMain: shadowTrades.filter(x=>x.status==="pending"&&!x.pairedResearchOnly).length, pendingContinuation: continuationShadows.filter(x=>x.status==="pending"&&!x.pairedResearchOnly).length, mainShadowBytes: approxJsonBytes(shadowTrades), continuationBytes: approxJsonBytes(continuationShadows), vetoBytes: approxJsonBytes(vetoLog) };
+      }
+    }
     if (isContinuation) continuationShadows = before; else shadowTrades = before;
     engine.shadowCreatedCount = previousCreatedCount; engine.shadowResearchOnlyCreatedCount = previousResearchOnlyCreatedCount; engine.shadowDedupStats = previousShadowDedupStats;
     engine.shadowTrades = shadowTrades; engine.continuationShadows = continuationShadows;
@@ -4266,6 +4498,10 @@ function closeFullPosition(acc, p, exitPrice, exitReason, exitTime, engine, exit
   const finalMae = Math.max(p.maePct || 0, exitAdversePct);
   const finalMfe = Math.max(p.mfePct || 0, exitFavorablePct);
   const closedAtTime = exitTime || Date.now();
+  const processedAtTime = Date.now();
+  const closeSegmentId = currentEvidenceSegmentId();
+  const cadenceContaminated = Number.isFinite(p.continuitySegmentIdAtEntry) && Number.isFinite(closeSegmentId) && p.continuitySegmentIdAtEntry !== closeSegmentId;
+  const recoveryInfo = gapRecoveryInfo(closedAtTime, processedAtTime);
   const durationHrs = p.openedAt ? (closedAtTime - p.openedAt) / 3600000 : null;
 
   // v34 fix: v32 detected and LABELED same-candle ambiguous cases, but the
@@ -4298,9 +4534,11 @@ function closeFullPosition(acc, p, exitPrice, exitReason, exitTime, engine, exit
     side: p.side, entry: p.entry, stop: p.stop, target: p.target,
     entryScore: p.entryScore,
     leverage: p.leverage, margin: p.margin, notional: p.notional, riskReward: p.riskReward,
-    reason: p.reason, exitPrice, exitReason: finalExitReason, closedAt: closedAtTime,
+    reason: p.reason, exitPrice, exitReason: finalExitReason, closedAt: closedAtTime, eventAt: closedAtTime, processedAt: processedAtTime,
     grossPnl, fees, netPnl, balanceAfter: acc.cash, result, exitPriceQuality,
     openedAt: p.openedAt, durationHrs, maePct: finalMae, mfePct: finalMfe,
+    continuitySegmentIdAtEntry: Number.isFinite(p.continuitySegmentIdAtEntry) ? p.continuitySegmentIdAtEntry : null,
+    continuitySegmentIdAtClose: closeSegmentId, cadenceContaminated, recoveredAfterCadenceGap: recoveryInfo.recoveredAfterCadenceGap, cadenceGapId: recoveryInfo.cadenceGapId,
     concurrentOpen: p.concurrentOpen, concurrentLong: p.concurrentLong, concurrentShort: p.concurrentShort,
     sameCoinSameSideOtherBots: p.sameCoinSameSideOtherBots || [],
     globalSameDirectionOpenAtEntry: p.globalSameDirectionOpenAtEntry || 0,
@@ -4779,14 +5017,14 @@ function generateReport() {
   out += `STRATEGY COMPARISON REPORT\nGenerated: ${new Date().toLocaleString()}\nRunning since: ${new Date(engine.startedAt).toLocaleString()}\n`;
   out += `Build that started this run: ${engine.startBuildTag || "(not recorded — pre-P2-3 save; current page build was " + BUILD_TAG + ")"}\n`;
   out += `Current page build: ${BUILD_TAG}${runBuildMismatch() ? " — BUILD CHANGED: new entries blocked; Reset required for a clean benchmark" : ""}\n`;
-  out += `Parent source identity: v43.9 SHA-256 ${BUILD_PARENT_SHA256} | MD5 ${BUILD_PARENT_MD5}\n`;
+  out += `Parent source identity: ${BUILD_PARENT_LABEL} SHA-256 ${BUILD_PARENT_SHA256} | MD5 ${BUILD_PARENT_MD5} | external approved-parent record ${BUILD_APPROVED_PARENT_RECORD}\n`;
   if (startupIntegrityBlocked) out += `STARTUP INTEGRITY WARNING: corrupted/unreadable persisted research data was detected (${startupIntegrityWarnings.map(x => x.key).join(", ")}). This state is NOT a clean benchmark baseline; verified Reset required.\n`;
   out += `Coin universe at start: ${engine.startCoinList ? engine.startCoinList.join(", ") : "(not recorded — pre-P2-3 save; current is " + coinList.join(", ") + ")"}\n`;
   out += `Auto-add at start: ${engine.startBuildTag ? (engine.startAutoAddOn ? "ON" : "OFF") : "(not recorded)"} | Fixed-universe benchmark lock: ${engine.benchmarkLock ? "ON" : "OFF"}\n`;
-  out += `\n=== V43.11 BUILD CHANGE / RESEARCH LOG ===\n`;
+  out += `\n=== V43.12 BUILD CHANGE / RESEARCH LOG ===\n`;
   out += `Fields: priority | item | status | why | expected | actual/current evidence | verdict | evidence level\n`;
-  V4311_CHANGE_LOG.forEach(([priority,item,status,why,expected,actual,verdict,evidence]) => { out += `${priority} | ${item} | ${status} | ${why} | expected: ${expected} | actual: ${actual} | verdict: ${verdict} | evidence: ${evidence}\n`; });
-  out += `Trading-policy note: v43.11 adds engineering reliability + research instrumentation only. It does NOT loosen/tighten strategy thresholds, score gates, stop/target rules, cooldowns, exposure caps, or live exit rules.\n\n`;
+  V4312_CHANGE_LOG.forEach(([priority,item,status,why,expected,actual,verdict,evidence]) => { out += `${priority} | ${item} | ${status} | ${why} | expected: ${expected} | actual: ${actual} | verdict: ${verdict} | evidence: ${evidence}\n`; });
+  out += `Trading-policy note: v43.12 is an engineering/provenance/research-observability release. It does NOT loosen/tighten strategy thresholds, score gates, stop/target rules, cooldowns, exposure caps, or live exit rules.\n\n`;
   // P2-5 fix: startToggles was already being captured at Start but never
   // actually printed anywhere — the report couldn't tell you which
   // strategies were even eligible to trade from the beginning of the run.
@@ -4869,8 +5107,24 @@ function generateReport() {
       if (cds.length) {
         const longN = cds.filter(x=>x.longGap).length;
         out += `Cadence diagnostic rows retained: ${cds.length} (bounded to latest 200) | >=120s gaps ${longN}. Recent incidents:\n`;
-        cds.slice(-10).forEach(x => { out += `  ${new Date(x.at).toLocaleString()} | gap ${(x.gapMs/1000).toFixed(1)}s | excess ${(x.excessMs/1000).toFixed(1)}s | missed ${x.missedTicks||0} | ${x.visibility}/${x.focus}/${x.online} | previous refresh ${Number.isFinite(x.previousRefreshMs)?(x.previousRefreshMs/1000).toFixed(1)+"s":"n/a"}\n`; });
+        cds.slice(-10).forEach(x => { const evt=Number.isFinite(x.eventAt)?new Date(x.eventAt).toLocaleString():"n/a"; const proc=Number.isFinite(x.processedAt)?new Date(x.processedAt).toLocaleString():new Date(x.at).toLocaleString(); out += `  gap-event ~${evt} | detected/resumed ${proc} | gap ${(x.gapMs/1000).toFixed(1)}s | excess ${(x.excessMs/1000).toFixed(1)}s | missed ${x.missedTicks||0} | ${x.visibility}/${x.focus}/${x.online} | previous refresh ${Number.isFinite(x.previousRefreshMs)?(x.previousRefreshMs/1000).toFixed(1)+"s":"n/a"}\n`; });
       }
+    }
+    const gov = ensureEvidenceGovernor();
+    if (gov) {
+      out += `\n=== V43.12 RESEARCH EVIDENCE GOVERNOR ===\n`;
+      out += `Continuity segmentation threshold: >${(gov.gapThresholdMs/1000).toFixed(0)}s | current segment ${gov.currentSegmentId} | segments retained ${gov.segments.length} | qualifying segment gaps ${gov.gaps.length}${gov.initializedFromLegacy?" | NOTE: governor initialized from a pre-v43.12 saved run; historical segment reconstruction is incomplete":""}\n`;
+      const allSegTrades = engine.allTradesEver || [];
+      gov.segments.forEach(seg => {
+        const segTrades = allSegTrades.filter(t => t.continuitySegmentIdAtEntry === seg.id);
+        const contaminated = segTrades.filter(t => t.cadenceContaminated).length;
+        out += `Segment ${seg.id}: ${new Date(seg.startAt).toLocaleString()} -> ${seg.endAt ? new Date(seg.endAt).toLocaleString() : "OPEN"} | trigger ${seg.trigger || "n/a"}${seg.gapBeforeId?` after gap ${seg.gapBeforeId}`:""} | real entries ${seg.realEntries || 0} | closed trades ${segTrades.length} | crossing-gap closed trades ${contaminated}\n`;
+      });
+      if (gov.gaps.length) {
+        out += `Segment boundaries / cadence gaps (eventAt is inferred first missed 30s tick; processedAt is detection/recovery):\n`;
+        gov.gaps.slice(-20).forEach(g => { out += `  Gap ${g.id}: eventAt ~${new Date(g.eventAt).toLocaleString()} | processedAt ${new Date(g.processedAt).toLocaleString()} | ${(g.gapMs/1000).toFixed(1)}s | segment ${g.priorSegmentId}->${g.nextSegmentId} | ${g.visibility}/${g.focus}/${g.online}\n`; });
+      }
+      out += `Lifecycle rows retained: ${Array.isArray(engine.lifecycleEvents)?engine.lifecycleEvents.length:0} (bounded to latest 200).\n`;
     }
     const hadCadenceGap = h.cadenceGapCount > 0;
     // P1-7 fix: the previous classifier only checked fullSyncPct>=99,
@@ -4952,7 +5206,7 @@ function generateReport() {
   out += `Regime telemetry integrity: ${teleClean ? "CLEAN" : "INCOMPLETE / CHECK ERRORS"} | errors ${hReg ? (hReg.regimeTelemetryErrors || 0) : 0} | reconstruction mismatches ${hReg ? (hReg.regimeDiagnosticMismatchCount || 0) : 0}\n`;
   out += `Regime-counter semantics: a raw-state change resets confirmation to mixed on its first closed candle, then a second consecutive closed candle confirms the new state. One raw transition can therefore produce two confirmed-state transitions (old confirmed -> mixed -> new confirmed), so confirmed changes may legitimately exceed raw changes.\n`;
   if (rtConfirmedGreaterThanRaw.length) out += `Confirmed>raw audit list: ${rtConfirmedGreaterThanRaw.map(x => `${x.coin} raw ${x.rawChanges}/confirmed ${x.confirmedChanges} [into-mixed ${x.confIntoMixed}, out-of-mixed ${x.confOutOfMixed}, direct ${x.confDirect}]`).join("; ")}\n`;
-  try { out += `Current dashboard-owned localStorage estimate: ${(estimateDashboardOwnedBytes()/1024/1024).toFixed(2)} MB | research soft ceiling ${(RESEARCH_STORAGE_SOFT_CEILING_BYTES/1024/1024).toFixed(2)} MB (ceiling/halt basis; see storage section below)\n`; } catch (_) {}
+  try { out += `Current dashboard-current localStorage estimate: ${(estimateDashboardCurrentBytes()/1024/1024).toFixed(2)} MB | research soft ceiling ${(RESEARCH_STORAGE_SOFT_CEILING_BYTES/1024/1024).toFixed(2)} MB (ceiling/halt basis; see storage section below)\n`; } catch (_) {}
 
   out += `\n=== TRADE / REGIME LINKAGE (regime-integrity-era telemetry window only) ===\n`;
   const linkTrades = (engine.allTradesEver || []).filter(t => Number.isFinite(t.openedAt));
@@ -5099,7 +5353,8 @@ function generateReport() {
     const resolvedStr = st.resolvedAt ? ` | Resolved: ${new Date(st.resolvedAt).toLocaleString()} @ $${fmt(st.resolvedPrice, decimalsFor(st.resolvedPrice))}` : "";
     const dollarStr = (st.classification) ? ` | Actual $${fmt(st.actualPnl)} vs hypothetical hold $${fmt(st.hypotheticalPnl)} (delta $${fmt(st.deltaVsActual)}, ${st.classification})` : "";
     const qualityStr = st.resolvedPriceQuality === "coarse_pre_expiry_fallback" ? " | PRICE QUALITY: APPROXIMATE pre-expiry coarse fallback" : "";
-    out += `[${new Date(st.t).toLocaleString()}] ${BOTS.find(x=>x.key===st.bot)?.label || st.bot} | ${st.coin} ${st.side} | ${vLabels[st.vetoType] || st.vetoType} | Entry $${fmt(st.entry, decimalsFor(st.entry))} Stop $${fmt(st.stop, decimalsFor(st.stop))} Target $${fmt(st.target, decimalsFor(st.target))} | ${resStr}${resolvedStr}${dollarStr}${qualityStr} | Reason: ${st.reason}\n`;
+    const shadowProv = st.status === "resolved" ? ` | eventAt ${Number.isFinite(st.eventAt)?new Date(st.eventAt).toLocaleString():"n/a"} | processedAt ${Number.isFinite(st.processedAt)?new Date(st.processedAt).toLocaleString():"n/a"} | segment ${st.continuitySegmentIdAtEntry ?? "n/a"}->${st.continuitySegmentIdAtResolution ?? "n/a"}${st.cadenceContaminated?" CONTAMINATED":""}${st.recoveredAfterCadenceGap?` | recovered gap ${st.cadenceGapId}`:""}` : ` | segment ${st.continuitySegmentIdAtEntry ?? "n/a"}`;
+    out += `[${new Date(st.t).toLocaleString()}] ${BOTS.find(x=>x.key===st.bot)?.label || st.bot} | ${st.coin} ${st.side} | ${vLabels[st.vetoType] || st.vetoType} | Entry $${fmt(st.entry, decimalsFor(st.entry))} Stop $${fmt(st.stop, decimalsFor(st.stop))} Target $${fmt(st.target, decimalsFor(st.target))} | ${resStr}${resolvedStr}${dollarStr}${qualityStr}${shadowProv} | Reason: ${st.reason}\n`;
   });
   out += `
 `;
@@ -5120,6 +5375,24 @@ function generateReport() {
   const winRateOf = arr => { const w = arr.filter(t=>t.result==="Win").length, l = arr.filter(t=>t.result==="Loss").length; return (w+l) ? w/(w+l)*100 : 0; };
   out += `Trades sharing a coin+direction with another active strategy at entry: ${clustered.length} of ${allTradesForCluster.length} | win rate ${fmt(winRateOf(clustered),1)}% | net $${fmt(netOf(clustered))}\n`;
   out += `Trades with no other strategy on the same coin+direction: ${isolated.length} of ${allTradesForCluster.length} | win rate ${fmt(winRateOf(isolated),1)}% | net $${fmt(netOf(isolated))}\n`;
+  out += `\n=== V43.12 STRATEGY INDEPENDENCE PAIRWISE ENTRY-OVERLAP MAP (measurement only) ===\n`;
+  const pairStats = {};
+  allTradesForCluster.forEach(t => {
+    (t.sameCoinSameSideOtherBots || []).forEach(otherLabel => {
+      const other = BOTS.find(b=>b.label===otherLabel);
+      const otherKey = other ? other.key : otherLabel;
+      const keys = [t.bot, otherKey].sort();
+      const k = keys.join("<->");
+      if (!pairStats[k]) pairStats[k] = { participantTrades:0, wins:0, losses:0, ambiguous:0, net:0 };
+      const q = pairStats[k]; q.participantTrades++; q.net += (t.netPnl || 0);
+      if (t.result === "Win") q.wins++; else if (t.result === "Loss") q.losses++; else q.ambiguous++;
+    });
+  });
+  const pairRows = Object.entries(pairStats).sort((a,b)=>b[1].participantTrades-a[1].participantTrades);
+  if (!pairRows.length) out += `No pairwise same-coin+direction overlap yet.\n`;
+  pairRows.forEach(([k,q]) => { const wr=(q.wins+q.losses)?q.wins/(q.wins+q.losses)*100:0; out += `${k}: ${q.participantTrades} participant trade(s) | ${q.wins}W/${q.losses}L${q.ambiguous?`/${q.ambiguous} ambiguous`:""} | win rate ${fmt(wr,1)}% | participant net $${fmt(q.net)}\n`; });
+  out += `Interpretation caution: this is asymmetric entry-time overlap evidence, not proof of causal dependence; use the structured export for episode-level controls by regime/wave.\n`;
+
   out += `Interpretation: this measures SAME-COIN + SAME-DIRECTION duplication across strategies only. It is intentionally separate from the broad cross-coin market-wave research below; duplicate-thesis risk and market-wide confirmation are not merged into one exposure metric.\n\n`;
 
   out += `=== STRATEGY TOTALS (all coins combined) ===\n`;
@@ -5175,6 +5448,9 @@ function generateReport() {
   out += `Gross P/L before fees: ${allGross >= 0 ? "+" : ""}$${fmt(allGross)}\nTotal fees paid: -$${fmt(allFees)}\nNet P/L after fees: ${allNet >= 0 ? "+" : ""}$${fmt(allNet)}\n`;
   if (allAmbiguous) out += `NOTE: these figures include ${allAmbiguous} Ambiguous trade${allAmbiguous > 1 ? "s" : ""} using conservative simulation accounting (not necessarily the stop — an expiry-boundary ambiguity uses the fallback/expiry price instead). Decided-only (excludes Ambiguous): gross ${allGrossDecided >= 0 ? "+" : ""}$${fmt(allGrossDecided)} | fees -$${fmt(allFeesDecided)} | net ${allNetDecided >= 0 ? "+" : ""}$${fmt(allNetDecided)}\n`;
   if (allGross > 0) out += `Fees consumed ${fmt((allFees / allGross) * 100, 0)}% of gross profit.\n`;
+  out += `Fee efficiency by strategy (gross -> fees -> net):\n`;
+  BOTS.forEach(b=>{const a=(engine.allTradesEver||[]).filter(t=>t.bot===b.key);if(!a.length)return;const g=a.reduce((z,t)=>z+(t.grossPnl||0),0),f=a.reduce((z,t)=>z+(t.fees||0),0),n=a.reduce((z,t)=>z+(t.netPnl||0),0);const drag=g>0?f/g*100:null;out += `  ${b.label}: gross $${fmt(g)} | fees $${fmt(f)} | net $${fmt(n)}${drag==null?"":` | fees ${fmt(drag,1)}% of positive gross`}\n`;});
+
 
   out += `\n=== PERFORMANCE BY ENTRY SCORE ===\n`;
   out += `Does a higher scanner score actually mean a better trade? This is the evidence.\n`;
@@ -5332,6 +5608,15 @@ function generateReport() {
   out += `Research only. Same-coin duplicate-thesis exposure remains a separate measurement from broad cross-coin market-wave confirmation; neither changes allocation in v43.11.\n`;
 
 
+  out += `\n=== V43.12 PROTECTIVE-EXIT ACTUAL-vs-HOLD EXPECTANCY ===\n`;
+  const peStats = engine.protectiveExitOutcomeStats || {};
+  [["early_exit_continuation","Early-exit trip-wire"],["regime_flip_continuation","Regime-flip exit"]].forEach(([k,label]) => {
+    const q=peStats[k];
+    if (!q || !q.n) { out += `${label}: no exact-once resolved continuation evidence yet.\n`; return; }
+    const uniqueN=q.uniqueEventKeys?Object.keys(q.uniqueEventKeys).length:0;
+    out += `${label}: ${q.n} participant continuation(s) across ${uniqueN} unique coin+side+resolution-time market event(s) | actual net $${fmt(q.actualNetSum)} | hypothetical hold net $${fmt(q.hypotheticalNetSum)} | actual-minus-hold $${fmt(q.deltaActualMinusHoldSum)} | GOOD_SAVE ${q.goodSave||0} | MISSED_WINNER ${q.missedWinner||0} | NEUTRAL ${q.neutral||0}\n`;
+  });
+
   out += `\n=== V43.11 PROFIT-PROTECTION COUNTERFACTUALS ===\n`;
   const prTrades=(engine.allTradesEver||[]).filter(t=>t.profitProtectionCounterfactuals&&t.result!=="Ambiguous");
   const prRules=[["Break-even after +1R","be1R"],["Lock +0.5R after +1R","lock05At1R"],["1R trailing stop after +1R","trail1R"],["Take 50% at +1R; remainder actual exit","halfAt1R"]];
@@ -5402,7 +5687,13 @@ function generateReport() {
     uniqueStages.forEach(([k,label])=>{out += `  ${label}: reached ${bt.stageReach&&bt.stageReach[k]||0} | ever passed ${bt.stagePass&&bt.stagePass[k]||0}\n`;});
     const terminal = bt.terminalStage || {};
     out += `Ended-episode terminal stage: ${Object.keys(terminal).length ? Object.entries(terminal).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`${k} ${v}`).join(" | ") : "none yet"}\n`;
-  } else out += `Unique signal-episode research: no data yet (starts on a fresh v43.11 run).\n`;
+    out += `Bollinger permission-volume resolved outcome bins (research-only; closed-candle permission volRatio):\n`;
+  const bv = engine.bollingerPermissionVolumeOutcomeStats || {};
+  const bvOrder=["<0.50","0.50-0.79","0.80-0.89","0.90-0.99",">=1.00"];
+  if (!Object.keys(bv).length) out += `  No resolved permission-volume shadows yet under v43.12 metadata.\n`;
+  bvOrder.forEach(k=>{const q=bv[k];if(!q||!q.n)return;const wr=(q.wins+q.losses)?q.wins/(q.wins+q.losses)*100:0;const avg=q.hypNetCount?q.hypNetSum/q.hypNetCount:null;out += `  ${k}x: ${q.n} resolved | ${q.wins}W/${q.losses}L/${q.timeouts} timeout${q.ambiguous?`/${q.ambiguous} ambiguous`:""} | would-win ${fmt(wr,1)}% | avg hypothetical ${avg==null?"n/a":"$"+fmt(avg)}\n`;});
+
+  } else out += `Unique signal-episode research: no data yet (starts on a fresh v43.12 run).\n`;
 
 
   out += `\n=== V43.11 TARGET-CAP CUMULATIVE PAIRED OUTCOMES ===\n`;
@@ -5422,17 +5713,19 @@ function generateReport() {
   out += `\n=== V43.11 STORAGE COMPONENT ESTIMATE ===\n`;
   const mainShadowRows=shadowTrades.filter(st=>!st.pairedResearchOnly),researchShadowRows=shadowTrades.filter(st=>st.pairedResearchOnly);
   [["Regime telemetry",engine.regimeTelemetry],["Regime-exit telemetry",engine.regimeExitTelemetry],["Real-trade ledger",engine.allTradesEver],["Main shadow detail",mainShadowRows],["Research-only target companions",researchShadowRows],["Continuation shadows",continuationShadows],["Veto detail",vetoLog],["Target-cap cumulative registry",engine.targetCapEventRegistry],["Shadow dedup stats",engine.shadowDedupStats],["Veto attribution outcome stats",engine.vetoAttributionOutcomeStats],["Veto regime outcome stats",engine.vetoRegimeOutcomeStats],["Bollinger episode research",engine.bollingerEpisodeResearch],["Cadence gap diagnostics",engine.apiHealth&&engine.apiHealth.cadenceGapDiagnostics],["Engine events",engineEvents]].forEach(([label,obj])=>{const b=approxJsonBytes(obj);out += `${label}: ${b==null?"n/a":(b/1024).toFixed(1)+" KB"}\n`;});
+  const capd = engine.storageCapacityDiagnostics || {};
+  if (capd.preflightCompactionRuns) out += `Shadow capacity preflight: compaction runs ${capd.preflightCompactionRuns} | cumulative bytes removed before projection ${((capd.preflightCompactionSavedBytes||0)/1024).toFixed(1)} KB | max one-pass savings ${((capd.maxPreflightCompactionSavedBytes||0)/1024).toFixed(1)} KB | peak projected payload ${((capd.peakProjectedBytes||0)/1024/1024).toFixed(2)} MB | skip events ${capd.skipEvents||0}${capd.firstSkip?` | first skip ${new Date(capd.firstSkip.at).toLocaleString()} projected ${(capd.firstSkip.projectedBytes/1024/1024).toFixed(2)} MB / current ${Number.isFinite(capd.firstSkip.currentBytes)?(capd.firstSkip.currentBytes/1024/1024).toFixed(2)+" MB":"n/a"}`:""}\n`;
   const scs = engine.shadowCompactionStats || {};
   out += `Resolved-evidence compaction: full-detail window main ${scs.forensicWindow ?? SHADOW_FORENSIC_WINDOW}, companion ${scs.companionForensicWindow ?? SHADOW_COMPANION_FORENSIC_WINDOW} | retained-stub caps main ${scs.retainedStubCap ?? SHADOW_COMPACTED_STUB_CAP}, companion ${scs.companionStubCap ?? SHADOW_COMPANION_STUB_CAP} | compacted main ${scs.totalCompactedMain||0}, continuation ${scs.totalCompactedCont||0} | old folded stubs dropped after cumulative preservation ${scs.totalDroppedFoldedStubs||0}. Unresolved shadows are never removed by this compaction.\n`;
   // v43.10-r2: the ceiling/halt decision (projectedStorageBytesWithEngine)
-  // now uses dashboard-owned bytes only — this line reports that SAME basis,
+  // now uses dashboard-current bytes only — this line reports that SAME basis,
   // not the whole browser origin, so the number driving real behavior is the
   // one shown first and clearly labeled.
   try{
-    const ownedB=estimateDashboardOwnedBytes(),originB=estimateLocalStorageBytes();
-    const remain=Math.max(0,RESEARCH_STORAGE_SOFT_CEILING_BYTES-ownedB),elapsedH=Math.max(.01,(Date.now()-(engine.startedAt||Date.now()))/3600000),rate=ownedB/elapsedH;
-    out += `Dashboard-owned storage (drives the 3.50MB ceiling and shadow-sampling halt): ${(ownedB/1024/1024).toFixed(2)} MB | ceiling ${(RESEARCH_STORAGE_SOFT_CEILING_BYTES/1024/1024).toFixed(2)} MB | headroom ${(remain/1024/1024).toFixed(2)} MB | naive runway ${rate>0?(remain/rate).toFixed(1)+"h":"n/a"} at average bytes/hour since start.\n`;
-    out += `Whole-origin storage (environmental diagnostic only — does NOT drive the halt; other same-origin apps' data, e.g. Research Lab, or this app's own stale legacy keys, can appear here without affecting collection): ${(originB/1024/1024).toFixed(2)} MB${originB>ownedB?` (${((originB-ownedB)/1024/1024).toFixed(2)} MB of this is outside dashboard-owned keys — see per-key table below)`:""}\n`;
+    const currentB=estimateDashboardCurrentBytes(),originB=estimateLocalStorageBytes();
+    const remain=Math.max(0,RESEARCH_STORAGE_SOFT_CEILING_BYTES-currentB),elapsedH=Math.max(.01,(Date.now()-(engine.startedAt||Date.now()))/3600000),rate=currentB/elapsedH;
+    out += `Dashboard-current storage (drives the 3.50MB ceiling and shadow-sampling halt — active keys only, excludes stale legacy): ${(currentB/1024/1024).toFixed(2)} MB | ceiling ${(RESEARCH_STORAGE_SOFT_CEILING_BYTES/1024/1024).toFixed(2)} MB | headroom ${(remain/1024/1024).toFixed(2)} MB | naive runway ${rate>0?(remain/rate).toFixed(1)+"h":"n/a"} at average bytes/hour since start.\n`;
+    out += `Whole-origin storage (environmental diagnostic only — does NOT drive the halt; other same-origin apps' data, e.g. Research Lab, or this app's own stale legacy keys, can appear here without affecting collection): ${(originB/1024/1024).toFixed(2)} MB${originB>currentB?` (${((originB-currentB)/1024/1024).toFixed(2)} MB of this is outside dashboard-current keys — see per-key table below)`:""}\n`;
     const gs = storageGrowthStats(engine);
     if (gs) {
       const recentRunwayH = gs.bytesPerHour > 0 ? remain / gs.bytesPerHour : null;
@@ -5460,7 +5753,7 @@ function generateReport() {
   out += `\n=== V43.11 INSTRUMENTATION COMPLETENESS ===\n`;
   const ih=engine.instrumentationHealth||{},installed=engine.instrumentationVersion===V439_INSTRUMENTATION_VERSION;
   out += `Data/shadow evidence integrity is separate from instrumentation completeness. Package ${installed?"INSTALLED":"MISMATCH / OLD RUN"} (${engine.instrumentationVersion||"none"}); runtime research errors ${ih.errors||0}${ih.byModule&&Object.keys(ih.byModule).length?` | ${Object.entries(ih.byModule).map(([k,v])=>`${k}:${v}`).join(", ")}`:""}.\n`;
-  out += `Expected modules: closed-volume reversal state; timestamp-safe Donchian re-arm; cumulative shadow dedup + attribution counters; score sub-check + de-correlated research outcomes; market-wave outcomes; chronological profit-protection counterfactuals; cumulative target-cap paired registry; storage compaction/reporting; cadence root-cause diagnostics; unique Bollinger episode funnel.\n`;
+  out += `Expected modules: closed-volume reversal state; timestamp-safe Donchian re-arm; cumulative shadow dedup + attribution counters; score sub-check + de-correlated research outcomes; market-wave outcomes; chronological profit-protection counterfactuals; cumulative target-cap paired registry; storage compaction/reporting; cadence root-cause diagnostics; unique Bollinger episode funnel; v43.12 Evidence Governor; lifecycle telemetry; eventAt/processedAt provenance; structured JSON/CSV export; protective-exit expectancy; Bollinger permission-volume outcome bins.\n`;
 
   out += `\n=== BY COIN, BY STRATEGY ===\n`;
   // v33 fix: was scoped to coinList only, silently dropping any removed
@@ -5508,7 +5801,10 @@ function generateReport() {
     const scoreSubStr = sub ? ` | Score subchecks: SMA10/30 aligned ${sub.sma10_30Aligned?"Y":"N"}, px/SMA96 aligned ${sub.priceVsSma96Aligned?"Y":"N"}, px/SMA192 aligned ${sub.priceVsSma192Aligned?"Y":"N"}, MACD dir aligned ${sub.macdDirectionAligned?"Y":"N"}, RSI healthy ${sub.rsiHealthyBand?"Y":"N"}, RSI extreme countertrend ${sub.rsiExtremeCountertrend?"Y":"N"}` : "";
     const snapStr = `RSI ${snap.rsi != null ? snap.rsi.toFixed(1) : "n/a"}, MACD hist ${snap.macdHist != null ? snap.macdHist.toFixed(3) : "n/a"}, stable regime ${snap.regime || "n/a"}, live regime ${snap.liveRegime || "n/a"}, closed raw ${snap.closedRawRegime || "n/a"}, regime age ${snap.regimeAgeCandles != null ? snap.regimeAgeCandles+" candles" : "n/a"}, boundary +${snap.entryBoundarySeconds != null ? snap.entryBoundarySeconds+"s" : "n/a"}, closed ROC ${snap.closedRocPct != null ? snap.closedRocPct.toFixed(2)+"%" : "n/a"}, ATR ${snap.atrPct != null ? (snap.atrPct*100).toFixed(2)+"%" : "n/a"}, vol ${snap.volRatio != null ? snap.volRatio.toFixed(2)+"x" : "n/a"}${scoreSubStr}`;
     const clusterStr = (t.sameCoinSameSideOtherBots && t.sameCoinSameSideOtherBots.length) ? `Also open on this coin+direction: ${t.sameCoinSameSideOtherBots.join(", ")}` : "No other strategy on this coin+direction";
-    out += `[${new Date(t.closedAt).toLocaleString()}] ${t.botLabel} | ${t.coin} ${t.side} | Entered: ${entryTimeStr} | Duration: ${durStr} | Reason for entry: ${t.reason || "n/a"} | Score at entry: ${t.entryScore == null ? "n/a" : t.entryScore} | Entry $${fmt(t.entry, pd)} Stop $${fmt(t.stop, pd)} Target $${fmt(t.target, pd)} | Lev ${t.leverage}x | R:R ${fmt(t.riskReward, 2)} | MAE ${maeStr} MFE ${mfeStr} | Concurrent: ${concStr} | Cluster: ${clusterStr} | Market-wave: ${t.globalSameDirectionOpenAtEntry || 0} same-direction already open, ${t.recentSameDirection20mAtEntry || 0} opened in prior 20m | Entry snapshot: ${snapStr} | Exit $${fmt(t.exitPrice, pd)} (${t.exitReason}) | Gross $${fmt(t.grossPnl)} Fees $${fmt(t.fees)} Net $${fmt(t.netPnl)} | Balance after $${fmt(t.balanceAfter)} | ${t.result}\n`;
+    const eventAtStr = Number.isFinite(t.eventAt) ? new Date(t.eventAt).toLocaleString() : new Date(t.closedAt).toLocaleString();
+    const processedAtStr = Number.isFinite(t.processedAt) ? new Date(t.processedAt).toLocaleString() : "legacy/n/a";
+    const cadenceProv = `Segment ${t.continuitySegmentIdAtEntry ?? "n/a"}->${t.continuitySegmentIdAtClose ?? "n/a"}${t.cadenceContaminated?" CONTAMINATED":" clean-lifetime"}${t.recoveredAfterCadenceGap?` | recovered after gap ${t.cadenceGapId}`:""}`;
+    out += `[eventAt ${eventAtStr} | processedAt ${processedAtStr}] ${t.botLabel} | ${t.coin} ${t.side} | Entered: ${entryTimeStr} | Duration: ${durStr} | ${cadenceProv} | Reason for entry: ${t.reason || "n/a"} | Score at entry: ${t.entryScore == null ? "n/a" : t.entryScore} | Entry $${fmt(t.entry, pd)} Stop $${fmt(t.stop, pd)} Target $${fmt(t.target, pd)} | Lev ${t.leverage}x | R:R ${fmt(t.riskReward, 2)} | MAE ${maeStr} MFE ${mfeStr} | Concurrent: ${concStr} | Cluster: ${clusterStr} | Market-wave: ${t.globalSameDirectionOpenAtEntry || 0} same-direction already open, ${t.recentSameDirection20mAtEntry || 0} opened in prior 20m | Entry snapshot: ${snapStr} | Exit $${fmt(t.exitPrice, pd)} (${t.exitReason}) | Gross $${fmt(t.grossPnl)} Fees $${fmt(t.fees)} Net $${fmt(t.netPnl)} | Balance after $${fmt(t.balanceAfter)} | ${t.result}\n`;
   });
 
   return out;
@@ -5539,6 +5835,60 @@ function downloadReport() {
   const blob = new Blob([t], { type: "text/plain" });
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
   a.download = "strategy_comparison_" + new Date().toISOString().slice(0, 10) + ".txt"; a.click();
+}
+
+function buildResearchExportSnapshot() {
+  if (!engine) return null;
+  return {
+    schema: "V43.12-RESEARCH-EXPORT-1",
+    exportedAt: Date.now(),
+    build: { tag: BUILD_TAG, parentLabel: BUILD_PARENT_LABEL, parentSha256: BUILD_PARENT_SHA256, parentMd5: BUILD_PARENT_MD5, approvedParentRecord: BUILD_APPROVED_PARENT_RECORD },
+    retentionNote: "Resolved shadow detail may be compacted/dropped after exact-once folding; cumulative aggregates below remain authoritative for outcomes.",
+    run: { startedAt: engine.startedAt, startBuildTag: engine.startBuildTag, startCoinList: engine.startCoinList, startToggles: engine.startToggles, startAutoAddOn: engine.startAutoAddOn, benchmarkLock: engine.benchmarkLock },
+    evidenceGovernor: engine.evidenceGovernor || null,
+    lifecycleEvents: engine.lifecycleEvents || [],
+    apiHealth: engine.apiHealth || null,
+    storageCapacityDiagnostics: engine.storageCapacityDiagnostics || null,
+    trades: engine.allTradesEver || [],
+    shadows: shadowTrades || [],
+    continuationShadows: continuationShadows || [],
+    vetoLog: vetoLog || [],
+    engineEvents: engineEvents || [],
+    aggregates: {
+      shadowTotals: engine.shadowTotals || {}, shadowTotalsByStrategy: engine.shadowTotalsByStrategy || {}, vetoTotals: engine.vetoTotals || {},
+      vetoAttributionOutcomeStats: engine.vetoAttributionOutcomeStats || {}, vetoRegimeOutcomeStats: engine.vetoRegimeOutcomeStats || {},
+      protectiveExitOutcomeStats: engine.protectiveExitOutcomeStats || {}, bollingerPermissionVolumeOutcomeStats: engine.bollingerPermissionVolumeOutcomeStats || {},
+      bollingerEpisodeResearch: engine.bollingerEpisodeResearch || {}, targetCapEventRegistry: engine.targetCapEventRegistry || {}, shadowCompactionStats: engine.shadowCompactionStats || {}
+    }
+  };
+}
+function triggerDownload(filename, content, mime) {
+  const blob = new Blob([content], { type: mime });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = filename; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+}
+function downloadResearchJson() {
+  if (refreshInProgress) { alert("Research export unavailable while a refresh cycle is processing."); return; }
+  const snap = buildResearchExportSnapshot(); if (!snap) { alert("Start the test first."); return; }
+  triggerDownload("strategy_research_" + new Date().toISOString().slice(0,10) + ".json", JSON.stringify(snap, null, 2), "application/json");
+}
+function csvCell(v) {
+  if (v === null || v === undefined) return "";
+  const s = typeof v === "object" ? JSON.stringify(v) : String(v);
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
+}
+function downloadResearchCsv() {
+  if (refreshInProgress) { alert("Research export unavailable while a refresh cycle is processing."); return; }
+  if (!engine) { alert("Start the test first."); return; }
+  const cols = ["recordType","id","at","eventAt","processedAt","openedAt","closedAt","bot","coin","side","status","resolution","result","vetoType","reason","entry","stop","target","exitPrice","netPnl","hypotheticalPnl","actualPnl","deltaVsActual","vetoAttribution","vetoRegimeBucket","vetoVolRatio","meanReversionFailureStage","continuitySegmentIdAtEntry","continuitySegmentIdAtResolution","cadenceContaminated","recoveredAfterCadenceGap","cadenceGapId","decisionCycleId"];
+  const rows = [];
+  const push = (type,o) => rows.push(cols.map(c => csvCell(c === "recordType" ? type : o[c])).join(","));
+  (engine.allTradesEver || []).forEach(t => push("trade", { ...t, at:t.closedAt, continuitySegmentIdAtResolution:t.continuitySegmentIdAtClose }));
+  (shadowTrades || []).forEach(x => push("shadow", x));
+  (continuationShadows || []).forEach(x => push("continuation_shadow", x));
+  (vetoLog || []).forEach(v => push("veto", { ...v, at:v.t, vetoType:v.type, continuitySegmentIdAtEntry:v.continuitySegmentId }));
+  const csv = cols.join(",") + "\n" + rows.join("\n");
+  triggerDownload("strategy_records_" + new Date().toISOString().slice(0,10) + ".csv", csv, "text/csv");
 }
 
 // ---------- LIVE DATA / CARDS ----------
@@ -5592,8 +5942,10 @@ async function refresh() {
           const online = (typeof navigator !== "undefined" && typeof navigator.onLine === "boolean") ? (navigator.onLine ? "online" : "offline") : "unknown";
           const prevDur = h.refreshDurationsMs && h.refreshDurationsMs.length ? h.refreshDurationsMs[h.refreshDurationsMs.length - 1] : null;
           if (!Array.isArray(h.cadenceGapDiagnostics)) h.cadenceGapDiagnostics = [];
+          const gapEventAt = h.lastCycleStartedAt + EXPECTED_CADENCE_MS;
           h.cadenceGapDiagnostics.push({
             at: cycleStart,
+            eventAt: gapEventAt, eventAtQuality: "inferred_first_missed_30s_tick", processedAt: cycleStart, detectedAt: cycleStart, resumedAt: cycleStart,
             previousStartAt: h.lastCycleStartedAt,
             gapMs: gap,
             excessMs: Math.max(0, gap - EXPECTED_CADENCE_MS),
@@ -5604,6 +5956,7 @@ async function refresh() {
             previousRefreshMs: Number.isFinite(prevDur) ? prevDur : null,
             longGap: gap >= 120000,
           });
+          if (gap > EVIDENCE_GAP_SEGMENT_MS) recordEvidenceCadenceGap(h.lastCycleStartedAt, cycleStart, gap, missed, { visibility, focus: focused, online });
           if (h.cadenceGapDiagnostics.length > 200) h.cadenceGapDiagnostics = h.cadenceGapDiagnostics.slice(-200);
           if (!h.cadenceGapByVisibility || typeof h.cadenceGapByVisibility !== "object") h.cadenceGapByVisibility = {};
           if (!h.cadenceGapByFocus || typeof h.cadenceGapByFocus !== "object") h.cadenceGapByFocus = {};
@@ -5618,11 +5971,13 @@ async function refresh() {
     }
   }
   const startBtn = document.getElementById("engineStartBtn"), resetBtn = document.getElementById("engineResetBtn");
-  const genReportBtn = document.getElementById("genReportBtn"), downloadReportBtn = document.getElementById("downloadReportBtn");
+  const genReportBtn = document.getElementById("genReportBtn"), downloadReportBtn = document.getElementById("downloadReportBtn"), downloadResearchJsonBtn = document.getElementById("downloadResearchJsonBtn"), downloadResearchCsvBtn = document.getElementById("downloadResearchCsvBtn");
   try {
     document.getElementById("refreshBtn").disabled = true;
     if (genReportBtn) genReportBtn.disabled = true;
     if (downloadReportBtn) downloadReportBtn.disabled = true;
+    if (downloadResearchJsonBtn) downloadResearchJsonBtn.disabled = true;
+    if (downloadResearchCsvBtn) downloadResearchCsvBtn.disabled = true;
     // P0-3 fix (defense in depth, alongside the generation-token check
     // above): disable the two destructive actions for the duration of this
     // cycle too, so the race is harder to trigger in the first place, not
@@ -5739,6 +6094,8 @@ async function refresh() {
     if (resetBtn) resetBtn.disabled = false;
     if (genReportBtn) genReportBtn.disabled = false;
     if (downloadReportBtn) downloadReportBtn.disabled = false;
+    if (downloadResearchJsonBtn) downloadResearchJsonBtn.disabled = false;
+    if (downloadResearchCsvBtn) downloadResearchCsvBtn.disabled = false;
     refreshInProgress = false;
     // P2-2 fix: retry any auto-track pass that was skipped because THIS
     // refresh was still in flight — now that the lock has genuinely
@@ -6398,6 +6755,8 @@ document.getElementById("genReportBtn").addEventListener("click", showReport);
 document.getElementById("reportToggleBtn").addEventListener("click", toggleReport);
 document.getElementById("reportCloseBtn").addEventListener("click", closeReport);
 document.getElementById("downloadReportBtn").addEventListener("click", downloadReport);
+document.getElementById("downloadResearchJsonBtn").addEventListener("click", downloadResearchJson);
+document.getElementById("downloadResearchCsvBtn").addEventListener("click", downloadResearchCsv);
 document.getElementById("wideScanBtn").addEventListener("click", runWideScan);
 const autoTrackControl = document.getElementById("autoTrackOn");
 const benchmarkLockControl = document.getElementById("benchmarkLockOn");
@@ -6415,6 +6774,15 @@ if (autoTrackControl) autoTrackControl.addEventListener("change", () => {
   }
   if (engine) logConfigEvent("auto_add_toggle", autoTrackControl.checked ? "ON" : "OFF");
 });
+
+// v43.12: browser lifecycle evidence. These are bounded, research-only events.
+document.addEventListener("visibilitychange", () => recordLifecycleEvent("visibilitychange"));
+window.addEventListener("focus", () => recordLifecycleEvent("focus"));
+window.addEventListener("blur", () => recordLifecycleEvent("blur"));
+window.addEventListener("pagehide", () => recordLifecycleEvent("pagehide"));
+window.addEventListener("pageshow", () => recordLifecycleEvent("pageshow"));
+window.addEventListener("online", () => recordLifecycleEvent("online"));
+window.addEventListener("offline", () => recordLifecycleEvent("offline"));
 
 renderToggles(); renderChips(); renderEngine();
 if (startupIntegrityBlocked) {
