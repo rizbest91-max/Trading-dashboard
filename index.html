@@ -152,7 +152,7 @@
     <div>
       <h1>Trading Monitor</h1>
       <div class="sub">Each strategy trades independently with its own $ per coin · live prices · no real money</div>
-      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v43.12 · 2026-09-20 (provenance guard + evidence governor + structured research export)</div>
+      <div style="font-size:11px; color:#4a5568; font-family:monospace;">Build v43.13 · 2026-09-24 (research persistence + data-quality governor + segment analytics)</div>
     </div>
     <button id="refreshBtn">Refresh</button>
   </div>
@@ -340,7 +340,7 @@
   <div class="grid" id="cardGrid"></div>
 
   <div class="footnote" style="text-align:center;">
-    <span style="font-family:monospace; color:#4a5568; font-size:11px;">Build v43.12</span> · Full version history moved to the Excel research register — this footer no longer duplicates it.<br/>
+    <span style="font-family:monospace; color:#4a5568; font-size:11px;">Build v43.13</span> · Full version history moved to the Excel research register — this footer no longer duplicates it.<br/>
     Assumption recorded: £/$ treated as 1:1 since prices come from USDT pairs — no live FX conversion applied. Fees assumed at 0.1% per side, no funding cost modeled. Each strategy's pot per coin is fully isolated — a loss in one never affects another. Data saved only in this browser. Price/execution simulation uses Binance SPOT candles throughout; the funding-rate signal (used by Funding+Momentum and the scanner) is pulled from the separate PERPETUAL FUTURES market as a sentiment proxy only — no funding payments are simulated or applied to any P&L. Spot and futures prices can differ, so this is a proxy signal, not a futures execution model.
   </div>
 </div>
@@ -350,34 +350,23 @@
 // can actually work on them). More coins = more signals = a usable sample size
 // sooner. The exposure cap keeps total risk in check, so a wider list gives the
 // system more to choose from rather than more to pile into.
-const BUILD_TAG = "v43.12 · 2026-09-20 (provenance guard + evidence governor + structured research export)";
-const BUILD_PARENT_LABEL = "v43.11";
-const BUILD_PARENT_SHA256 = "d91907f33482bc6a808d8158f2446b98e017ed0b1af8d81bee8a50613660e986";
-const BUILD_PARENT_MD5 = "b642f49c564b7edc1259f359c7c1f215";
-const BUILD_APPROVED_PARENT_RECORD = "v43_12_APPROVED_PARENT.json";
-const V439_INSTRUMENTATION_VERSION = "v43.12-r1"; // variable name retained to minimize unrelated diff churn
-const V4312_CHANGE_LOG = [
-  ["P0", "External approved-parent ancestry guard", "IMPLEMENTED", "Prevent building from a correctly-hashed but superseded parent", "Build must match the separately maintained approved-parent record before patching", "v43.12 build script hard-fails unless exact v43.11 bytes/MD5/SHA256/line count match external record", "PASS", "BUILD-VERIFIED"],
-  ["P0", "Restore corrected-r2 storage ownership semantics", "IMPLEMENTED", "v43.11 inherited the superseded r2 draft and re-counted stale legacy keys", "Only dashboard-current active keys drive the 3.50MB research ceiling; stale keys remain diagnostic only", "estimateDashboardCurrentBytes restored; stale-legacy excluded from the halt basis", "PASS", "SOURCE-VERIFIED"],
-  ["P0", "Research Evidence Governor", "IMPLEMENTED RESEARCH-ONLY", "Keep cadence-contaminated evidence separate instead of poisoning one pooled run", ">90s gaps close a continuity segment; records crossing a gap are tagged contaminated", "Segment IDs + explicit boundaries + gap rows + per-segment real-entry counts added", "PENDING RUNTIME", "CODE-VERIFIED"],
-  ["P0", "Event-time versus processing-time provenance", "IMPLEMENTED", "Historical reconciliation timestamps were mistaken for live engine activity", "Closed trades/shadows and cadence gaps expose economic/event time separately from processing/detection time", "eventAt/processedAt + recovered-after-gap metadata added; no P/L logic changed", "PENDING RUNTIME", "CODE-VERIFIED"],
-  ["P0", "Lifecycle cadence telemetry", "IMPLEMENTED", "Visibility/focus state sampled only after a gap could not prove the transition sequence", "Bounded visibility/focus/blur/pagehide/pageshow/online/offline events persist with timestamps and segment ID", "Lifecycle event recorder installed; bounded to 200 rows", "PENDING RUNTIME", "CODE-VERIFIED"],
-  ["P0", "Shadow-cap preflight compaction + peak diagnostics", "IMPLEMENTED RESEARCH RELIABILITY", "Preflight could judge capacity before the save-path compaction that would immediately follow", "Compact resolved evidence before candidate capacity projection and retain peak/first-skip forensic counters", "No signal/trade rule change; candidate research sampling gets a post-compaction capacity basis", "PENDING RUNTIME", "CODE-VERIFIED"],
-  ["P1", "Machine-readable research export", "IMPLEMENTED", "Independent review should not regex-parse free-text reports", "Export JSON snapshot and normalized CSV records for trades/shadows/vetoes", "Two explicit download buttons added; export includes governor, health and cumulative research aggregates", "PASS", "CODE-VERIFIED"],
-  ["P1", "Strategy-independence entry-overlap map", "IMPLEMENTED REPORT-ONLY", "Same-coin duplicate thesis needs pairwise decomposition", "Report pairwise participant-trade outcomes without changing allocation", "Derived from existing sameCoinSameSideOtherBots data; no new trading state", "PENDING SAMPLE", "CODE-VERIFIED"],
-  ["P1", "Protective-exit expectancy summary", "IMPLEMENTED RESEARCH-ONLY", "Would-win counts can disagree with actual dollar expectancy", "Persist exact-once actual-vs-hold aggregate delta and unique market-event count by protective exit type", "Cumulative continuation statistics added; live exits unchanged", "PENDING SAMPLE", "CODE-VERIFIED"],
-  ["P1", "Bollinger permission-volume outcome bins", "IMPLEMENTED RESEARCH-ONLY", "v43.11 showed the permission-volume stage was the bottleneck but lacked outcome-by-volume evidence", "Fold resolved Bollinger volume-stage shadows into <0.5/0.5-0.79/0.8-0.89/0.9-0.99/>=1.0 bins", "Closed-candle permission failure stage + volRatio now retained in shadow research metadata", "PENDING SAMPLE", "CODE-VERIFIED"],
-  ["P0", "Resolved-shadow compaction hardening", "IMPLEMENTED", "Extend storage runway without dropping unresolved evidence", "Lower ongoing resolved-detail growth", "Runtime runway improvement requires a fresh v43.11 run", "PENDING RUNTIME", "CODE-VERIFIED"],
-  ["P0", "Cadence gap root-cause telemetry", "IMPLEMENTED", "Replace Safari/background-throttling guesses with incident evidence", "Classify delayed cycles by visibility/focus/network/prior refresh", "Runtime cause requires a fresh overnight run", "PENDING RUNTIME", "CODE-VERIFIED"],
-  ["P1", "Regime raw-vs-confirmed semantics audit", "RESOLVED/EXPLAINED", "Explain confirmed-change counts that can exceed raw changes", "Reconstruct transition semantics and surface component counts", "Source shows raw change -> confirmed mixed -> confirmed new state can create two confirmed transitions", "PASS", "SOURCE-VERIFIED"],
-  ["P1", "Veto attribution research", "IMPLEMENTED/PARTIAL BY DESIGN", "Avoid treating multi-veto candidates as clean evidence against each filter", "Persist resolved outcomes by known sole/multi/unknown attribution", "Only parallel related-check groups can be honestly classified sole/multi; later short-circuited gates remain unknown", "INCONCLUSIVE UNTIL DATA", "CODE-VERIFIED"],
-  ["P1", "Bollinger unique-episode funnel", "IMPLEMENTED", "Distinguish repeated 30s evaluations from independent signal episodes", "Expose stage-by-stage unique episode progression", "Runtime funnel evidence requires a fresh v43.11 run", "PENDING RUNTIME", "CODE-VERIFIED"],
-  ["P1", "De-correlated research score", "IMPLEMENTED RESEARCH-ONLY", "Test whether correlated trend checks are double-counted", "Compare alternate composite-trend score with the unchanged live score", "No live score/gating change; outcome comparison requires new decided trades", "PENDING SAMPLE", "CODE-VERIFIED"],
-  ["P1", "Donchian market-wave detail", "IMPLEMENTED RESEARCH-ONLY", "Test continuation-vs-first-breakout hypothesis", "Report 0/1-2/3+ recent same-direction entries with regime/ROC/ATR/volume/MFE/MAE", "Existing trade ledger can report historical rows; confidence still needs larger sample", "INCONCLUSIVE", "EARLY DATA"],
-  ["P1", "Duplicate thesis vs broad market wave", "CLARIFIED/SEPARATED", "Prevent same-coin duplication from being confused with cross-coin confirmation", "Report the two concepts separately", "Report labels/interpretation separated; no exposure rule changed", "PASS", "REPORT-VERIFIED"],
-  ["SMALL", "R:R display precision", "IMPLEMENTED", "Prevent valid near-floor values being visually rounded to exactly 0.8", "Show two decimals in full trade log", "Display changed only; trading calculation unchanged", "PASS", "CODE-VERIFIED"],
-  ["AUDIT", "Post-target-cap validation order", "PASS", "Confirm capped targets are revalidated using final economics", "Cap -> direction -> final target distance -> 0.80R -> min profit -> reachability", "Source order confirmed exactly; no defect found", "PASS", "SOURCE-VERIFIED"],
-  ["SETTINGS", "Fresh benchmark defaults", "IMPLEMENTED", "Make fresh load/Reset reproducible without manual toggles", "24 coins + benchmark lock ON + auto-add OFF", "Defaults and Reset path installed; runtime UI verification still recommended", "PENDING UI CHECK", "CODE-VERIFIED"],
+const BUILD_TAG = "v43.13 · 2026-09-24 (research persistence + data-quality governor + segment analytics)";
+const BUILD_PARENT_LABEL = "v43.12";
+const BUILD_PARENT_SHA256 = "cad09c4e276e81f904ce704c1ab5d649fb008e683655ed8240bb6ddab0bfa6b6";
+const BUILD_PARENT_MD5 = "feb632de132f2215751b0405fffa7ca6";
+const BUILD_APPROVED_PARENT_RECORD = "v43_13_APPROVED_PARENT.json";
+const V439_INSTRUMENTATION_VERSION = "v43.13-r1"; // variable name retained to minimize unrelated diff churn
+const V4313_CHANGE_LOG = [
+  ["P0", "Resolved-shadow IndexedDB archive", "IMPLEMENTED RESEARCH RELIABILITY", "v43.12 reached the localStorage research ceiling and skipped 9,086 shadow samples", "Fold resolved outcomes exactly once, archive full resolved detail to IndexedDB, then remove archived old detail from localStorage while leaving unresolved evidence local and reload-safe", "Archive is idempotent by run+shadow key; local detail is purged only after IndexedDB transaction success; cumulative engine aggregates remain authoritative", "PENDING RUNTIME", "CODE-VERIFIED"],
+  ["P0", "Resumable shadow-pressure gate", "IMPLEMENTED RESEARCH RELIABILITY", "v43.12 made the first capacity skip a sticky sampling halt for the rest of the run", "Keep run-level incompleteness sticky, but allow later research sampling to resume after verified pressure relief with hysteresis and an epoch boundary", "Pause threshold remains 3.50MB dashboard-current; resume requires <3.00MB; skipped samples remain counted and the run can never be relabelled fully clean", "PENDING RUNTIME", "CODE-VERIFIED"],
+  ["P0", "Data-Quality Governor incident timeline", "IMPLEMENTED RESEARCH-ONLY", "Cumulative failure counters could not prove which continuity segment or trade mutations overlapped a degraded cycle", "Timestamp failed/partial/stale cycles with coins, error classes, timeout delta, lifecycle state, segment and entry/close deltas", "Bounded incident rows added; no trading decision consumes them", "PENDING RUNTIME", "CODE-VERIFIED"],
+  ["P0", "Cadence state semantics", "IMPLEMENTED RESEARCH-ONLY", "v43.12 gap rows described resume state and could mislabel the state during the silent interval", "Record state at previous cycle end, inferred first missed tick, and resume separately using lifecycle history", "Legacy visibility/focus/online fields retained as resume-state compatibility fields; new structured states remove the ambiguity", "PENDING RUNTIME", "CODE-VERIFIED"],
+  ["P0", "Cycle phase timing + visible event-loop lag", "IMPLEMENTED RESEARCH-ONLY", "One unexplained cadence event could not be separated into fetch, engine, persistence or browser-event-loop delay", "Measure fetch/engine/final-save phases and visible-mode heartbeat lag without changing scheduling", "Bounded phase rows and heartbeat summaries added", "PENDING RUNTIME", "CODE-VERIFIED"],
+  ["P0", "Active collection clock + storage growth rate", "IMPLEMENTED RESEARCH-ONLY", "Wall-clock storage slope is distorted by hours when the browser is suspended", "Track active continuity time separately and report storage growth per wall hour and per active collection hour", "Hourly snapshots now carry activeMs and report both slopes", "PENDING RUNTIME", "CODE-VERIFIED"],
+  ["P1", "Per-segment performance analytics", "IMPLEMENTED REPORT-ONLY", "The Evidence Governor created clean segments but the report still pooled strategy/score/duplicate/wave results", "Report clean-lifetime P/L by segment, strategy, score, duplicate-thesis status and Donchian wave bucket", "Derived only from the immutable real-trade ledger; no allocation or signal rule changed", "PENDING SAMPLE", "CODE-VERIFIED"],
+  ["P1", "Bollinger confirmation alternatives", "IMPLEMENTED RESEARCH-ONLY", "v43.12 showed 16 episodes passed the first closed confirmation and 0 passed the second", "Measure unique-episode eligibility under 1-closed, current 2-consecutive, and 2-of-3 permission confirmations", "Eligibility counters only; current 2-consecutive live rule is unchanged and no alternate-confirmation trade is opened", "PENDING SAMPLE", "CODE-VERIFIED"],
+  ["P1", "Current open-position research snapshot", "IMPLEMENTED EXPORT/REPORT", "Checkpoint analysis lacked a canonical machine-readable snapshot of positions still open at export time", "Export and report current open positions with segment provenance", "Read-only derived snapshot added", "PENDING RUNTIME", "CODE-VERIFIED"],
+  ["AUDIT", "Trading policy freeze", "PASS", "v43.13 is an infrastructure/research release", "No strategy threshold, score gate, stop/target, cooldown, exposure, target-cap, Donchian re-arm, or protective-exit behavior may change", "Protected trading-rule function bodies and threshold literals are checked against v43.12 by the build verifier", "PASS", "BUILD-VERIFIED"],
 ];
 
 const DEFAULT_COINS = [
@@ -855,7 +844,7 @@ function saveToggles() { safeLocalStorageSet(LS_TOGGLES, JSON.stringify(toggles)
 // deliberately left unchanged so a page reload mid-run does not trigger a
 // build-mismatch against an already-started v43.10 session. Track this
 // patch's own identity separately:
-const STORAGE_ACCOUNTING_REVISION = "v43.12 (dashboard-current vs whole-origin split; stale-legacy diagnostic only; post-compaction shadow preflight)";
+const STORAGE_ACCOUNTING_REVISION = "v43.13 (dashboard-current localStorage + IndexedDB resolved-shadow archive + resumable pressure gate)";
 const DASHBOARD_KEY_PREFIX = "tm2_";
 // Every key this exact build actively reads/writes. Any OTHER tm2_-prefixed
 // key found in localStorage is still this app's own data (a prior version
@@ -926,6 +915,7 @@ function estimateLocalStorageBytes() {
 // the next research record is attempted; actual write failures still trigger
 // the authoritative persistence-degraded fail-stop.
 const RESEARCH_STORAGE_SOFT_CEILING_BYTES = Math.floor(3.5 * 1024 * 1024);
+const RESEARCH_STORAGE_RESUME_BYTES = Math.floor(3.0 * 1024 * 1024); // hysteresis: a pressure-paused run resumes only after verified relief below this level
 function projectedStorageBytesWithEngine() {
   // v43.10-r2 fix: this now measures DASHBOARD-CURRENT bytes only, not the
   // whole browser origin. Same subtract-old/add-projected-new logic as
@@ -947,6 +937,148 @@ function storageProblemLabel() {
   if (t === "QuotaExceededError" || t === "NS_ERROR_DOM_QUOTA_REACHED") return "STORAGE FULL";
   return t ? `STORAGE WRITE UNAVAILABLE (${t})` : "STORAGE WRITE UNAVAILABLE";
 }
+
+// v43.13 research persistence redesign.
+// Resolved+counted shadow DETAIL is not required to manage any live or pending
+// position. Its scientific outcomes are already exact-once folded into the
+// engine aggregates. v43.13 archives the full resolved record to IndexedDB and
+// only then allows old archived detail to leave localStorage. Pending shadows
+// remain in the authoritative synchronous engine save so reloads cannot lose an
+// unresolved counterfactual. IndexedDB failure therefore degrades archive
+// capacity only; it never causes resolved evidence to be deleted from localStorage.
+const RESEARCH_ARCHIVE_DB_NAME = "tm2Research_v43_13";
+const RESEARCH_ARCHIVE_DB_VERSION = 1;
+const RESEARCH_ARCHIVE_STORE = "resolvedShadows";
+const RESEARCH_ARCHIVE_LOCAL_MAIN_WINDOW = 20;
+const RESEARCH_ARCHIVE_LOCAL_CONT_WINDOW = 20;
+let researchArchiveDbPromise = null;
+let researchArchiveInFlight = false;
+function ensureResearchRunId() {
+  if (!engine) return null;
+  if (!engine.researchRunId) engine.researchRunId = `run-${engine.startedAt || Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+  return engine.researchRunId;
+}
+function ensureResearchArchiveStats() {
+  if (!engine) return null;
+  if (!engine.researchArchiveStats || typeof engine.researchArchiveStats !== "object") {
+    engine.researchArchiveStats = { version:"v43.13-idb1", archivedRecords:0, archivedApproxBytes:0, writeErrors:0, readErrors:0, lastError:null, lastSuccessAt:null, lastAttemptAt:null, localPurgedRecords:0, queuedBatches:0 };
+  }
+  return engine.researchArchiveStats;
+}
+function openResearchArchiveDb() {
+  if (researchArchiveDbPromise) return researchArchiveDbPromise;
+  researchArchiveDbPromise = new Promise((resolve, reject) => {
+    if (typeof indexedDB === "undefined") { reject(new Error("IndexedDB unavailable")); return; }
+    const req = indexedDB.open(RESEARCH_ARCHIVE_DB_NAME, RESEARCH_ARCHIVE_DB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(RESEARCH_ARCHIVE_STORE)) db.createObjectStore(RESEARCH_ARCHIVE_STORE, { keyPath:"archiveKey" });
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error || new Error("IndexedDB open failed"));
+  });
+  return researchArchiveDbPromise;
+}
+function researchArchiveKey(st, runId) { return `${runId}|${String(st.id)}`; }
+async function archiveResolvedShadowBatch(records) {
+  if (!records.length) return 0;
+  const db = await openResearchArchiveDb();
+  const runId = ensureResearchRunId();
+  return await new Promise((resolve, reject) => {
+    const tx = db.transaction(RESEARCH_ARCHIVE_STORE, "readwrite");
+    const store = tx.objectStore(RESEARCH_ARCHIVE_STORE);
+    records.forEach(st => {
+      const copy = { ...st, archiveKey:researchArchiveKey(st, runId), researchRunId:runId, archivedAt:Date.now() };
+      delete copy._idbArchived;
+      store.put(copy); // idempotent overwrite by stable run+shadow key
+    });
+    tx.oncomplete = () => resolve(records.length);
+    tx.onerror = () => reject(tx.error || new Error("IndexedDB archive transaction failed"));
+    tx.onabort = () => reject(tx.error || new Error("IndexedDB archive transaction aborted"));
+  });
+}
+function purgeArchivedResolvedFromLocalArrays() {
+  if (!engine) return 0;
+  let purged = 0;
+  function purge(arr, keepWindow) {
+    const pending = arr.filter(st => st.status === "pending" || !st._idbArchived);
+    const archivedResolved = arr.filter(st => st.status !== "pending" && st._idbArchived)
+      .sort((a,b)=>(b.resolvedAt||b.t||0)-(a.resolvedAt||a.t||0));
+    const keep = archivedResolved.slice(0, keepWindow);
+    purged += Math.max(0, archivedResolved.length - keep.length);
+    return pending.concat(keep).sort((a,b)=>(b.t||0)-(a.t||0));
+  }
+  shadowTrades = purge(shadowTrades, RESEARCH_ARCHIVE_LOCAL_MAIN_WINDOW);
+  continuationShadows = purge(continuationShadows, RESEARCH_ARCHIVE_LOCAL_CONT_WINDOW);
+  engine.shadowTrades = shadowTrades;
+  engine.continuationShadows = continuationShadows;
+  const st = ensureResearchArchiveStats();
+  if (st && purged) st.localPurgedRecords = (st.localPurgedRecords || 0) + purged;
+  return purged;
+}
+function queueResolvedShadowArchival() {
+  if (!engine || researchArchiveInFlight) return;
+  const candidates = shadowTrades.concat(continuationShadows).filter(st => st && st.status === "resolved" && st.counted === true && !st._idbArchived);
+  if (!candidates.length) return;
+  const stats = ensureResearchArchiveStats();
+  if (stats) { stats.lastAttemptAt = Date.now(); stats.queuedBatches = (stats.queuedBatches || 0) + 1; }
+  // Snapshot NOW, before any later local compaction can reduce forensic detail.
+  const batch = candidates.map(st => ({ ...st }));
+  const ids = new Set(candidates.map(st => String(st.id)));
+  const approxBytes = batch.reduce((n,x)=>n+(approxJsonBytes(x)||0),0);
+  researchArchiveInFlight = true;
+  archiveResolvedShadowBatch(batch).then(n => {
+    shadowTrades.concat(continuationShadows).forEach(st => { if (ids.has(String(st.id))) st._idbArchived = true; });
+    if (stats) { stats.archivedRecords = (stats.archivedRecords || 0) + n; stats.archivedApproxBytes = (stats.archivedApproxBytes || 0) + approxBytes; stats.lastSuccessAt = Date.now(); stats.lastError = null; }
+    purgeArchivedResolvedFromLocalArrays();
+    // Do not create an intermediate persistence boundary while refresh is
+    // mutating trading state; the refresh's normal final save will commit the
+    // smaller arrays. Outside a refresh, commit the purge immediately.
+    if (typeof refreshInProgress === "undefined" || !refreshInProgress) saveEngine();
+  }).catch(e => {
+    if (stats) { stats.writeErrors = (stats.writeErrors || 0) + 1; stats.lastError = e && (e.name || e.message) ? (e.name || e.message) : "IndexedDB archive error"; }
+    // Safe failure: nothing is marked archived, so local resolved evidence is retained.
+  }).finally(() => { researchArchiveInFlight = false; });
+}
+async function readArchivedShadowsForCurrentRun() {
+  if (!engine) return [];
+  const runId = ensureResearchRunId();
+  try {
+    const db = await openResearchArchiveDb();
+    const all = await new Promise((resolve,reject) => {
+      const tx = db.transaction(RESEARCH_ARCHIVE_STORE, "readonly");
+      const req = tx.objectStore(RESEARCH_ARCHIVE_STORE).getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error || new Error("IndexedDB archive read failed"));
+    });
+    return all.filter(x => x.researchRunId === runId).map(x => { const y={...x}; delete y.archiveKey; delete y.researchRunId; delete y.archivedAt; return y; });
+  } catch (e) {
+    const stats = ensureResearchArchiveStats();
+    if (stats) { stats.readErrors = (stats.readErrors || 0) + 1; stats.lastError = e && (e.name || e.message) ? (e.name || e.message) : "IndexedDB archive read error"; }
+    throw e;
+  }
+}
+function mergeShadowDetail(live, archived) {
+  const m = new Map();
+  (archived || []).forEach(x => m.set(String(x.id), x));
+  (live || []).forEach(x => m.set(String(x.id), x)); // live copy wins if both exist
+  return [...m.values()].sort((a,b)=>(b.t||0)-(a.t||0));
+}
+async function sampleBrowserStorageEstimate() {
+  if (!engine || !navigator.storage || typeof navigator.storage.estimate !== "function") return;
+  if (!engine.browserStorageTelemetry || typeof engine.browserStorageTelemetry !== "object") engine.browserStorageTelemetry = { lastAt:null, usage:null, quota:null, samples:[] };
+  const t=engine.browserStorageTelemetry;
+  const now=Date.now();
+  if (t.lastAt && now-t.lastAt < 5*60000) return;
+  try {
+    const est=await navigator.storage.estimate();
+    t.lastAt=now; t.usage=Number.isFinite(est.usage)?est.usage:null; t.quota=Number.isFinite(est.quota)?est.quota:null;
+    if (!Array.isArray(t.samples)) t.samples=[];
+    t.samples.push({at:now,usage:t.usage,quota:t.quota});
+    if(t.samples.length>48)t.samples=t.samples.slice(-48);
+  } catch(_) {}
+}
+
 // v43.9 research helpers. Measurement-only instrumentation must never throw
 // into real trading behavior; failures are counted and surfaced in the report.
 function approxJsonBytes(v) {
@@ -1168,6 +1300,7 @@ function ensureApiHealth() {
     regimeContinuityGapResets: 0, legacySameCandleExitConfirmations: 0,
     shadowCreationPaused: false, shadowCreationPausedCount: 0, // legacy fields retained for old saves/report compatibility only
     shadowCreationCurrentlyPaused: false, shadowCreationSkippedCount: 0, shadowResearchIncomplete: false,
+    shadowSamplingEpoch: 1, shadowSamplingResumeCount: 0, shadowPauseEvents: 0, shadowLastPausedAt: null, shadowLastResumedAt: null,
     shadowSkippedByType: {}, shadowSkippedByBot: {}, shadowSkippedByCoin: {},
     continuationExcludedAmbiguousSource: 0, timeoutApproxPriceCount: 0,
     lastCycleStartedAt: null, cadenceGapCount: 0, cadenceGapTotalMs: 0, cadenceGapMaxMs: 0, missedTickEstimate: 0,
@@ -1175,7 +1308,7 @@ function ensureApiHealth() {
     // retained (bounded), not every normal 30s cycle, so the diagnostic cost
     // stays small while still distinguishing hidden/background/offline/long-
     // resume patterns from ordinary API latency.
-    cadenceGapDiagnostics: [], cadenceGapByVisibility: {}, cadenceGapByFocus: {}, cadenceGapByOnline: {},
+    cadenceGapDiagnostics: [], cadenceGapByVisibility: {}, cadenceGapByFocus: {}, cadenceGapByOnline: {}, lastCycleCompletedAt: null,
   };
   if (!engine.apiHealth) {
     // v41.1 fix: cyclesCompleted only ever meant "the refresh function ran
@@ -1222,7 +1355,7 @@ function ensureEvidenceGovernor() {
   if (!engine.evidenceGovernor || typeof engine.evidenceGovernor !== "object") {
     const start = Number.isFinite(engine.startedAt) ? engine.startedAt : Date.now();
     engine.evidenceGovernor = {
-      version: "v43.12-r1", gapThresholdMs: EVIDENCE_GAP_SEGMENT_MS,
+      version: "v43.13-r1", gapThresholdMs: EVIDENCE_GAP_SEGMENT_MS,
       currentSegmentId: 1, nextGapId: 1,
       initializedFromLegacy: engine.startBuildTag !== BUILD_TAG,
       segments: [{ id: 1, startAt: start, endAt: null, endReason: null, trigger: "run_start", gapBeforeId: null, realEntries: 0 }],
@@ -1270,6 +1403,10 @@ function recordEvidenceCadenceGap(previousStartAt, resumedAt, gapMs, missedTicks
     missedTicks: missedTicks || 0,
     priorSegmentId,
     nextSegmentId,
+    stateAtPreviousCycleEnd: context && context.stateAtPreviousCycleEnd ? context.stateAtPreviousCycleEnd : {visibility:"unknown",focus:"unknown",online:"unknown"},
+    stateAtFirstMissedTick: context && context.stateAtFirstMissedTick ? context.stateAtFirstMissedTick : {visibility:"unknown",focus:"unknown",online:"unknown"},
+    stateAtResume: context && context.stateAtResume ? context.stateAtResume : {visibility:context && context.visibility || "unknown",focus:context && context.focus || "unknown",online:context && context.online || "unknown"},
+    // Compatibility fields are explicitly the RESUME snapshot in v43.13.
     visibility: context && context.visibility || "unknown",
     focus: context && context.focus || "unknown",
     online: context && context.online || "unknown"
@@ -1314,6 +1451,75 @@ function recordLifecycleEvent(type, at) {
   // atomic save boundary.
   if (typeof refreshInProgress === "undefined" || !refreshInProgress) saveEngine();
 }
+function currentLifecycleState() {
+  let focus="unknown"; try { focus=document.hasFocus()?"focused":"not-focused"; } catch(_) {}
+  return {
+    visibility:(typeof document!=="undefined"&&document.visibilityState)?document.visibilityState:"unknown",
+    focus,
+    online:(typeof navigator!=="undefined"&&typeof navigator.onLine==="boolean")?(navigator.onLine?"online":"offline"):"unknown"
+  };
+}
+function lifecycleStateAt(at) {
+  const rows = engine && Array.isArray(engine.lifecycleEvents) ? engine.lifecycleEvents : [];
+  let best = null;
+  for (const r of rows) { if (Number.isFinite(r.eventAt) && r.eventAt <= at && (!best || r.eventAt >= best.eventAt)) best=r; }
+  if (!best) return {visibility:"unknown",focus:"unknown",online:"unknown",source:"no_retained_event"};
+  return {visibility:best.visibility||"unknown",focus:best.focus||"unknown",online:best.online||"unknown",source:`lifecycle:${best.type||"event"}`,eventAt:best.eventAt};
+}
+function ensureDataQualityGovernor() {
+  if (!engine) return null;
+  if (!engine.dataQualityGovernor || typeof engine.dataQualityGovernor !== "object") engine.dataQualityGovernor = { version:"v43.13-dq1", incidents:[], totalIncidents:0, byType:{}, droppedOldRows:0 };
+  const g=engine.dataQualityGovernor;
+  if(!Array.isArray(g.incidents))g.incidents=[]; if(!g.byType)g.byType={};
+  return g;
+}
+function recordDataQualityIncident(row) {
+  const g=ensureDataQualityGovernor(); if(!g)return;
+  const type=row.failureType||"unknown"; g.totalIncidents=(g.totalIncidents||0)+1; g.byType[type]=(g.byType[type]||0)+1;
+  g.incidents.push({id:g.totalIncidents,...row});
+  if(g.incidents.length>500){const drop=g.incidents.length-500;g.incidents.splice(0,drop);g.droppedOldRows=(g.droppedOldRows||0)+drop;}
+}
+function ensureCollectionClock() {
+  if(!engine)return null;
+  if(!engine.collectionClock||typeof engine.collectionClock!=="object")engine.collectionClock={activeMs:0,lastCountedStartAt:null,wallStartedAt:engine.startedAt||Date.now()};
+  return engine.collectionClock;
+}
+function updateCollectionClock(cycleStart, previousStartAt) {
+  const c=ensureCollectionClock(); if(!c)return;
+  if(Number.isFinite(previousStartAt)){
+    const d=cycleStart-previousStartAt;
+    if(d>0 && d<=EVIDENCE_GAP_SEGMENT_MS)c.activeMs=(c.activeMs||0)+d;
+  }
+  c.lastCountedStartAt=cycleStart;
+}
+function recordCyclePhaseTiming(row) {
+  if(!engine)return;
+  if(!engine.cyclePhaseTimings||!Array.isArray(engine.cyclePhaseTimings))engine.cyclePhaseTimings=[];
+  engine.cyclePhaseTimings.push(row);
+  if(engine.cyclePhaseTimings.length>200)engine.cyclePhaseTimings=engine.cyclePhaseTimings.slice(-200);
+}
+function ensureEventLoopHealth(){
+  if(!engine)return null;
+  if(!engine.eventLoopHealth||typeof engine.eventLoopHealth!=="object")engine.eventLoopHealth={visibleSamples:0,visibleLagOver500ms:0,visibleLagOver2000ms:0,maxVisibleLagMs:0,recent:[]};
+  if(!Array.isArray(engine.eventLoopHealth.recent))engine.eventLoopHealth.recent=[];
+  return engine.eventLoopHealth;
+}
+const VISIBLE_HEARTBEAT_MS=5000;
+let visibleHeartbeatLastPerf=(typeof performance!=="undefined"?performance.now():Date.now());
+function visibleEventLoopHeartbeat(){
+  const nowPerf=(typeof performance!=="undefined"?performance.now():Date.now());
+  const lag=Math.max(0,nowPerf-visibleHeartbeatLastPerf-VISIBLE_HEARTBEAT_MS); visibleHeartbeatLastPerf=nowPerf;
+  if(!engine || (typeof document!=="undefined"&&document.visibilityState!=="visible"))return;
+  const h=ensureEventLoopHealth(); if(!h)return;
+  h.visibleSamples++; h.maxVisibleLagMs=Math.max(h.maxVisibleLagMs||0,lag); if(lag>=500)h.visibleLagOver500ms++; if(lag>=2000)h.visibleLagOver2000ms++;
+  if(lag>=250){h.recent.push({at:Date.now(),lagMs:lag,focus:currentLifecycleState().focus}); if(h.recent.length>100)h.recent=h.recent.slice(-100);}
+}
+function currentOpenPositionsSnapshot(){
+  if(!engine||!engine.bots)return[]; const rows=[];
+  BOTS.forEach(b=>{const bc=engine.bots[b.key]&&engine.bots[b.key].coins||{};Object.entries(bc).forEach(([coin,acc])=>{const p=acc&&acc.position;if(!p)return;rows.push({bot:b.key,botLabel:b.label,coin,side:p.side,entry:p.entry,stop:p.stop,target:p.target,openedAt:p.openedAt,continuitySegmentIdAtEntry:p.continuitySegmentIdAtEntry??null,entryScore:p.entryScore??null,reason:p.reason||null});});});
+  return rows.sort((a,b)=>(a.openedAt||0)-(b.openedAt||0));
+}
+
 function ensureStorageCapacityDiagnostics() {
   if (!engine) return null;
   if (!engine.storageCapacityDiagnostics || typeof engine.storageCapacityDiagnostics !== "object") {
@@ -2014,10 +2220,16 @@ function startEngine() {
     donchianRearmStats: { locksCreated: 0, validClears: 0, legacyPrematureClearOpportunities: 0, candidatesWhileLocked: 0, rearmVetoes: 0 },
     shadowDedupStats: { byType: {}, recentEpisodeAt: {}, lastCycleId: null, cycleSeen: {} },
     targetCapEventRegistry: {},
+    researchRunId: `run-${Date.now()}-${Math.random().toString(36).slice(2,8)}`,
+    researchArchiveStats: { version:"v43.13-idb1", archivedRecords:0, archivedApproxBytes:0, writeErrors:0, readErrors:0, lastError:null, lastSuccessAt:null, lastAttemptAt:null, localPurgedRecords:0, queuedBatches:0 },
+    dataQualityGovernor: { version:"v43.13-dq1", incidents:[], totalIncidents:0, byType:{}, droppedOldRows:0 },
+    collectionClock: { activeMs:0, lastCountedStartAt:null, wallStartedAt:Date.now() },
+    cyclePhaseTimings: [], eventLoopHealth: { visibleSamples:0, visibleLagOver500ms:0, visibleLagOver2000ms:0, maxVisibleLagMs:0, recent:[] },
+    bollingerConfirmationCounterfactual: { history:{}, episodeFlags:{}, totals:{ oneClosedEligibleEpisodes:0, twoConsecutiveEligibleEpisodes:0, twoOfThreeEligibleEpisodes:0 } },
     _shadowTotalsMigratedV43: true, storageSoftCeilingBytes: RESEARCH_STORAGE_SOFT_CEILING_BYTES
   };
   newEngine.evidenceGovernor = {
-    version: "v43.12-r1", gapThresholdMs: EVIDENCE_GAP_SEGMENT_MS, currentSegmentId: 1, nextGapId: 1, initializedFromLegacy: false,
+    version: "v43.13-r1", gapThresholdMs: EVIDENCE_GAP_SEGMENT_MS, currentSegmentId: 1, nextGapId: 1, initializedFromLegacy: false,
     segments: [{ id: 1, startAt: newEngine.startedAt, endAt: null, endReason: null, trigger: "run_start", gapBeforeId: null, realEntries: 0 }], gaps: []
   };
   newEngine.lifecycleEvents = [];
@@ -2036,6 +2248,8 @@ function startEngine() {
   engine = newEngine;
   engineGeneration++;
   engineEvents = []; vetoLog = []; shadowTrades = []; continuationShadows = []; ambiguousCandleCount = 0;
+  const initialLife = currentLifecycleState();
+  engine.lifecycleEvents = [{ type:"run_start", eventAt:engine.startedAt, processedAt:Date.now(), segmentId:1, ...initialLife }];
   // The full verified fresh-engine commit is the only operation allowed to
   // clear a persisted degraded latch for a new run.
   persistenceDegraded = false; persistenceDegradedSince = null;
@@ -2201,6 +2415,28 @@ function acceptBollingerEpisode(coin, side) {
   r.totals.acceptedEpisodes = (r.totals.acceptedEpisodes || 0) + 1;
   finalizeBollingerEpisodeKey(key, "accepted");
 }
+function ensureBollingerConfirmationCounterfactual(){
+  if(!engine)return null;
+  if(!engine.bollingerConfirmationCounterfactual||typeof engine.bollingerConfirmationCounterfactual!=="object")engine.bollingerConfirmationCounterfactual={history:{},episodeFlags:{},totals:{oneClosedEligibleEpisodes:0,twoConsecutiveEligibleEpisodes:0,twoOfThreeEligibleEpisodes:0}};
+  const r=engine.bollingerConfirmationCounterfactual;if(!r.history)r.history={};if(!r.episodeFlags)r.episodeFlags={};if(!r.totals)r.totals={oneClosedEligibleEpisodes:0,twoConsecutiveEligibleEpisodes:0,twoOfThreeEligibleEpisodes:0};return r;
+}
+function recordBollingerConfirmationCounterfactual(coin,side,candleTime,permissionAllowed){
+  if(!Number.isFinite(candleTime))return;
+  const r=ensureBollingerConfirmationCounterfactual(), er=ensureBollingerEpisodeResearch(); if(!r||!er)return;
+  const active=er.active[bollEpisodeKey(coin,side)]; if(!active)return;
+  const key=`${coin}|${side}`; if(!Array.isArray(r.history[key]))r.history[key]=[]; const hist=r.history[key];
+  const last=hist[hist.length-1];
+  if(!last||last.t!==candleTime){hist.push({t:candleTime,pass:!!permissionAllowed,episodeId:active.id});if(hist.length>6)hist.splice(0,hist.length-6);}else last.pass=!!permissionAllowed;
+  const sameEpisode=hist.filter(x=>x.episodeId===active.id).slice(-3);
+  const one=sameEpisode.length>=1&&sameEpisode[sameEpisode.length-1].pass;
+  const twoConsecutive=sameEpisode.length>=2&&sameEpisode[sameEpisode.length-1].pass&&sameEpisode[sameEpisode.length-2].pass&&sameEpisode[sameEpisode.length-1].t-sameEpisode[sameEpisode.length-2].t===FIFTEEN_MS;
+  const twoOfThree=sameEpisode.length>=3&&sameEpisode.filter(x=>x.pass).length>=2&&sameEpisode[2].t-sameEpisode[0].t===2*FIFTEEN_MS;
+  const fkey=String(active.id); if(!r.episodeFlags[fkey])r.episodeFlags[fkey]={one:false,twoConsecutive:false,twoOfThree:false}; const f=r.episodeFlags[fkey];
+  if(one&&!f.one){f.one=true;r.totals.oneClosedEligibleEpisodes=(r.totals.oneClosedEligibleEpisodes||0)+1;}
+  if(twoConsecutive&&!f.twoConsecutive){f.twoConsecutive=true;r.totals.twoConsecutiveEligibleEpisodes=(r.totals.twoConsecutiveEligibleEpisodes||0)+1;}
+  if(twoOfThree&&!f.twoOfThree){f.twoOfThree=true;r.totals.twoOfThreeEligibleEpisodes=(r.totals.twoOfThreeEligibleEpisodes||0)+1;}
+}
+
 
 function botSignal(botKey, ind) {
   const d = ind[botKey];
@@ -3193,6 +3429,7 @@ async function runEngineStep() {
           const confirmKey = `${bot.key}_${coin}_${side}`;
           if (!engine.reversalConfirm) engine.reversalConfirm = {};
           const lastClosedCandleTime = (s.times && s.times.length >= 2) ? s.times[s.times.length - 2] : null;
+          if (bot.key === "boll") recordBollingerConfirmationCounterfactual(coin, side, lastClosedCandleTime, !!permission.allowed);
           if (!permission.allowed) {
             engine.reversalConfirm[confirmKey] = { count: 0, lastCandleTime: null };
             if (bot.key === "boll") bumpBollFunnel("reversalCondition", side, false); // v43.10 #16
@@ -3727,10 +3964,10 @@ function pruneCountedShadowIds() {
 // a busy overnight run. Keep a useful forensic window, but bound old folded
 // identity stubs much more tightly so multi-day research has materially more
 // runway without discarding unresolved evidence.
-const SHADOW_FORENSIC_WINDOW = 80;
-const SHADOW_COMPANION_FORENSIC_WINDOW = 10;
-const SHADOW_COMPACTED_STUB_CAP = 750;
-const SHADOW_COMPANION_STUB_CAP = 100;
+const SHADOW_FORENSIC_WINDOW = RESEARCH_ARCHIVE_LOCAL_MAIN_WINDOW;
+const SHADOW_COMPANION_FORENSIC_WINDOW = RESEARCH_ARCHIVE_LOCAL_CONT_WINDOW;
+const SHADOW_COMPACTED_STUB_CAP = 0; // archived full detail lives in IndexedDB; no large local stub bank needed
+const SHADOW_COMPANION_STUB_CAP = 0;
 function foldAnyUncountedShadows(engineRef) {
   if (!engineRef) return 0;
   let folded = 0;
@@ -3772,28 +4009,21 @@ function compactShadowArray(arr) {
   const notYetFolded = arr.filter(st => st.status !== "pending" && st.counted !== true);
   const foldedMain = arr.filter(st => st.status !== "pending" && st.counted === true && !st.pairedResearchOnly);
   const foldedCompanion = arr.filter(st => st.status !== "pending" && st.counted === true && st.pairedResearchOnly);
-  function compactSubset(list, window, stubCap) {
-    list.sort((a, b) => (b.resolvedAt || b.t || 0) - (a.resolvedAt || a.t || 0));
-    const keepFull = list.slice(0, window);
-    const beyondWindow = list.slice(window);
-    const alreadyCompacted = beyondWindow.filter(st => st.compacted === true);
-    const toCompactNow = beyondWindow.filter(st => st.compacted !== true).map(compactShadowRecord);
-    const allStubs = alreadyCompacted.concat(toCompactNow).sort((a, b) => (b.resolvedAt || b.t || 0) - (a.resolvedAt || a.t || 0));
-    const keptStubs = allStubs.slice(0, stubCap);
-    const droppedStubs = Math.max(0, allStubs.length - keptStubs.length);
-    return { kept: keepFull.concat(keptStubs), compactedNow: toCompactNow.length, droppedStubs };
+  function archiveAwareSubset(list, window) {
+    list.sort((a,b)=>(b.resolvedAt||b.t||0)-(a.resolvedAt||a.t||0));
+    const unarchived=list.filter(st=>!st._idbArchived); // must remain local until archive transaction succeeds
+    const archived=list.filter(st=>st._idbArchived);
+    const keepArchived=archived.slice(0,window);
+    return {kept:unarchived.concat(keepArchived), compactedNow:0, droppedStubs:Math.max(0,archived.length-keepArchived.length)};
   }
-  const mainC = compactSubset(foldedMain, SHADOW_FORENSIC_WINDOW, SHADOW_COMPACTED_STUB_CAP);
-  const compC = compactSubset(foldedCompanion, SHADOW_COMPANION_FORENSIC_WINDOW, SHADOW_COMPANION_STUB_CAP);
-  return {
-    array: pending.concat(notYetFolded, mainC.kept, compC.kept),
-    compactedNow: mainC.compactedNow + compC.compactedNow,
-    droppedStubs: mainC.droppedStubs + compC.droppedStubs,
-  };
+  const mainC=archiveAwareSubset(foldedMain,SHADOW_FORENSIC_WINDOW);
+  const compC=archiveAwareSubset(foldedCompanion,SHADOW_COMPANION_FORENSIC_WINDOW);
+  return {array:pending.concat(notYetFolded,mainC.kept,compC.kept),compactedNow:0,droppedStubs:mainC.droppedStubs+compC.droppedStubs};
 }
 function runShadowCompactionSweep(engineRef) {
   if (!engineRef) return { folded: 0, compactedMain: 0, compactedCont: 0, droppedStubs: 0 };
   const folded = foldAnyUncountedShadows(engineRef);
+  queueResolvedShadowArchival(); // async full-detail archive; unarchived rows stay local until success
   const mainResult = compactShadowArray(shadowTrades);
   const contResult = compactShadowArray(continuationShadows);
   shadowTrades = mainResult.array;
@@ -3829,7 +4059,7 @@ function recordStorageGrowthSnapshot(engineRef) {
   let bytes = 0;
   try { bytes = approxJsonBytes(engineRef) || 0; } catch (_) { return; }
   const shadowsCreatedSoFar = engineRef.shadowCreatedCount || 0;
-  snaps.push({ t: now, bytes, shadowCreatedCount: shadowsCreatedSoFar });
+  snaps.push({ t: now, bytes, shadowCreatedCount: shadowsCreatedSoFar, activeMs: engineRef.collectionClock && Number.isFinite(engineRef.collectionClock.activeMs) ? engineRef.collectionClock.activeMs : 0 });
   if (snaps.length > STORAGE_GROWTH_SNAPSHOT_WINDOW) snaps.splice(0, snaps.length - STORAGE_GROWTH_SNAPSHOT_WINDOW);
 }
 function storageGrowthStats(engineRef) {
@@ -3838,10 +4068,14 @@ function storageGrowthStats(engineRef) {
   const first = snaps[0], last = snaps[snaps.length - 1];
   const hours = (last.t - first.t) / 3600000;
   if (hours <= 0) return null;
+  const activeHours = (Number.isFinite(last.activeMs) && Number.isFinite(first.activeMs)) ? (last.activeMs-first.activeMs)/3600000 : null;
   return {
     bytesPerHour: (last.bytes - first.bytes) / hours,
+    bytesPerActiveHour: activeHours && activeHours>0 ? (last.bytes-first.bytes)/activeHours : null,
     shadowsPerHour: (last.shadowCreatedCount - first.shadowCreatedCount) / hours,
+    shadowsPerActiveHour: activeHours && activeHours>0 ? (last.shadowCreatedCount-first.shadowCreatedCount)/activeHours : null,
     windowHours: hours,
+    activeWindowHours: activeHours,
     snapshotCount: snaps.length,
   };
 }
@@ -3860,7 +4094,9 @@ function saveShadowArraysAtomic() {
     engine.ambiguousCandleCount = ambiguousCandleCount;
     pruneCountedShadowIds();
     recordStorageGrowthSnapshot(engine); // authoritative post-compaction payload, immediately before save
-    return saveEngine(); // ONE write — arrays and shadowTotals commit together or not at all
+    const ok = saveEngine(); // local pending/recent detail + exact-once aggregates remain one synchronous write
+    if (ok) queueResolvedShadowArchival();
+    return ok;
   }
   const a = safeLocalStorageSet("tm2_shadow", JSON.stringify(shadowTrades));
   const b = safeLocalStorageSet("tm2_continuation", JSON.stringify(continuationShadows));
@@ -3957,30 +4193,42 @@ if (engine) {
 // the cap, which should never realistically happen.
 function trimShadowArray(arr, cap) {
   if (arr.length <= cap) return arr;
-  const mainPending = arr.filter(x => x.status === "pending" && !x.pairedResearchOnly);
-  const researchPending = arr.filter(x => x.status === "pending" && x.pairedResearchOnly);
-  const mainResolved = arr.filter(x => x.status !== "pending" && !x.pairedResearchOnly);
-  const researchResolved = arr.filter(x => x.status !== "pending" && x.pairedResearchOnly);
-  const pending = mainPending.concat(researchPending).sort((a,b)=>b.t-a.t);
-  if (pending.length >= cap) return pending; // pending evidence is never silently evicted
-  const room = cap - pending.length;
-  const keepMain = mainResolved.sort((a,b)=>b.t-a.t).slice(0, room);
-  const keepResearch = researchResolved.sort((a,b)=>b.t-a.t).slice(0, Math.max(0, room-keepMain.length));
-  return pending.concat(keepMain, keepResearch).sort((a,b)=>b.t-a.t);
+  const protectedRows = arr.filter(x => x.status === "pending" || !x._idbArchived).sort((a,b)=>(b.t||0)-(a.t||0));
+  const archivedResolved = arr.filter(x => x.status !== "pending" && x._idbArchived).sort((a,b)=>(b.t||0)-(a.t||0));
+  if (protectedRows.length >= cap) return protectedRows; // never evict pending OR not-yet-archived evidence
+  return protectedRows.concat(archivedResolved.slice(0, cap-protectedRows.length)).sort((a,b)=>(b.t||0)-(a.t||0));
 }
 
 const SHADOW_MAIN_PENDING_HARD_CEILING = 5000;
 const SHADOW_CONT_PENDING_HARD_CEILING = 2500;
 function recordShadowSkip(h, vetoType, botKey, coin) {
   if (!h) return;
+  if (!h.shadowCreationCurrentlyPaused) { h.shadowPauseEvents=(h.shadowPauseEvents||0)+1; h.shadowLastPausedAt=Date.now(); }
   h.shadowCreationCurrentlyPaused = true;
-  h.shadowCreationPaused = true; // legacy compatibility
+  h.shadowCreationPaused = true; // legacy compatibility: at least one pause has happened
   h.shadowCreationSkippedCount = (h.shadowCreationSkippedCount || 0) + 1;
   h.shadowCreationPausedCount = h.shadowCreationSkippedCount; // legacy compatibility
-  h.shadowResearchIncomplete = true; // sticky for the run; Reset is required for a clean filter benchmark
+  h.shadowResearchIncomplete = true; // sticky scientific fact: skipped samples can never be retroactively restored
   h.shadowSkippedByType[vetoType] = (h.shadowSkippedByType[vetoType] || 0) + 1;
   h.shadowSkippedByBot[botKey] = (h.shadowSkippedByBot[botKey] || 0) + 1;
   h.shadowSkippedByCoin[coin] = (h.shadowSkippedByCoin[coin] || 0) + 1;
+}
+function tryResumeShadowSampling(h) {
+  if (!h || !h.shadowCreationCurrentlyPaused || persistenceDegraded) return !h || !h.shadowCreationCurrentlyPaused;
+  runShadowCompactionSweep(engine);
+  purgeArchivedResolvedFromLocalArrays();
+  let projected=Infinity; try{projected=projectedStorageBytesWithEngine();}catch(_){}
+  if(projected < RESEARCH_STORAGE_RESUME_BYTES){
+    h.shadowCreationCurrentlyPaused=false;
+    h.shadowSamplingResumeCount=(h.shadowSamplingResumeCount||0)+1;
+    h.shadowSamplingEpoch=(h.shadowSamplingEpoch||1)+1;
+    h.shadowLastResumedAt=Date.now();
+    logEngineEvent(`Research shadow sampling RESUMED in epoch ${h.shadowSamplingEpoch} after localStorage pressure fell to ${(projected/1024/1024).toFixed(2)}MB. Earlier skipped samples remain a permanent run-level evidence gap.`);
+    saveEngine();
+    return true;
+  }
+  queueResolvedShadowArchival();
+  return false;
 }
 function recordShadowDedupCreation(vetoType, botKey, coin, side, researchMeta) {
   try {
@@ -4021,12 +4269,10 @@ function addShadowTrade(botKey, coin, side, entry, stop, target, reason, vetoTyp
   if (entry == null || stop == null || target == null) return false; // incomplete plan (e.g. no ATR yet) — nothing to track
   if (!engine || persistenceDegraded) return false;
   const capacityHealth = ensureApiHealth();
-  // Strict benchmark latch: after the first skipped counterfactual sample the
-  // run is no longer complete. Stop sampling until Reset rather than quietly
-  // resuming with a selectively missing period.
-  if (capacityHealth && capacityHealth.shadowResearchIncomplete) {
-    // The first capacity breach is already durably latched. Keep a best-effort
-    // count of later skipped samples; the run is already benchmark-ineligible.
+  // v43.13: incompleteness stays sticky, but a transient capacity PAUSE does
+  // not have to suppress the rest of the run forever. Resume only after
+  // verified hysteresis relief; the skipped interval remains explicitly tagged.
+  if (capacityHealth && capacityHealth.shadowCreationCurrentlyPaused && !tryResumeShadowSampling(capacityHealth)) {
     recordShadowSkip(capacityHealth, vetoType, botKey, coin);
     return false;
   }
@@ -4110,6 +4356,7 @@ function addShadowTrade(botKey, coin, side, entry, stop, target, reason, vetoTyp
     vetoVolRatio: researchMeta && Number.isFinite(researchMeta.vetoVolRatio) ? researchMeta.vetoVolRatio : null,
     meanReversionFailureStage: researchMeta && researchMeta.meanReversionFailureStage ? researchMeta.meanReversionFailureStage : null,
     continuitySegmentIdAtEntry: currentEvidenceSegmentId(), cadenceCleanAtEntry: true,
+    shadowSamplingEpoch: capacityHealth && Number.isFinite(capacityHealth.shadowSamplingEpoch) ? capacityHealth.shadowSamplingEpoch : 1,
     pairedResearchOnly: !!(researchMeta && researchMeta.pairedResearchOnly),
     dedupEventKey: dedupMeta.eventKey, eventRepresentative: !!dedupMeta.isRepresentative,
   };
@@ -4180,7 +4427,8 @@ function addShadowTrade(botKey, coin, side, entry, stop, target, reason, vetoTyp
     engine.shadowTrades = shadowTrades; engine.continuationShadows = continuationShadows;
     if (vetoPrepared) rollbackPreparedVeto(vetoPrepared);
     recordShadowSkip(capacityHealth, vetoType, botKey, coin);
-    saveShadowArraysAtomic(); // persist ONLY the sticky evidence-gap marker; no orphan veto/shadow
+    queueResolvedShadowArchival();
+    saveShadowArraysAtomic(); // persist evidence-gap marker; sampling may resume later only below the hysteresis threshold
     return false;
   }
   const persisted = saveShadowArraysAtomic(); // paired veto + shadow + counters in one LS_ENGINE write
@@ -5021,10 +5269,10 @@ function generateReport() {
   if (startupIntegrityBlocked) out += `STARTUP INTEGRITY WARNING: corrupted/unreadable persisted research data was detected (${startupIntegrityWarnings.map(x => x.key).join(", ")}). This state is NOT a clean benchmark baseline; verified Reset required.\n`;
   out += `Coin universe at start: ${engine.startCoinList ? engine.startCoinList.join(", ") : "(not recorded — pre-P2-3 save; current is " + coinList.join(", ") + ")"}\n`;
   out += `Auto-add at start: ${engine.startBuildTag ? (engine.startAutoAddOn ? "ON" : "OFF") : "(not recorded)"} | Fixed-universe benchmark lock: ${engine.benchmarkLock ? "ON" : "OFF"}\n`;
-  out += `\n=== V43.12 BUILD CHANGE / RESEARCH LOG ===\n`;
+  out += `\n=== V43.13 BUILD CHANGE / RESEARCH LOG ===\n`;
   out += `Fields: priority | item | status | why | expected | actual/current evidence | verdict | evidence level\n`;
-  V4312_CHANGE_LOG.forEach(([priority,item,status,why,expected,actual,verdict,evidence]) => { out += `${priority} | ${item} | ${status} | ${why} | expected: ${expected} | actual: ${actual} | verdict: ${verdict} | evidence: ${evidence}\n`; });
-  out += `Trading-policy note: v43.12 is an engineering/provenance/research-observability release. It does NOT loosen/tighten strategy thresholds, score gates, stop/target rules, cooldowns, exposure caps, or live exit rules.\n\n`;
+  V4313_CHANGE_LOG.forEach(([priority,item,status,why,expected,actual,verdict,evidence]) => { out += `${priority} | ${item} | ${status} | ${why} | expected: ${expected} | actual: ${actual} | verdict: ${verdict} | evidence: ${evidence}\n`; });
+  out += `Trading-policy note: v43.13 is a research-persistence/data-quality/observability release. It does NOT loosen/tighten strategy thresholds, score gates, stop/target rules, cooldowns, exposure caps, or live exit rules.\n\n`;
   // P2-5 fix: startToggles was already being captured at Start but never
   // actually printed anywhere — the report couldn't tell you which
   // strategies were even eligible to trade from the beginning of the run.
@@ -5107,13 +5355,13 @@ function generateReport() {
       if (cds.length) {
         const longN = cds.filter(x=>x.longGap).length;
         out += `Cadence diagnostic rows retained: ${cds.length} (bounded to latest 200) | >=120s gaps ${longN}. Recent incidents:\n`;
-        cds.slice(-10).forEach(x => { const evt=Number.isFinite(x.eventAt)?new Date(x.eventAt).toLocaleString():"n/a"; const proc=Number.isFinite(x.processedAt)?new Date(x.processedAt).toLocaleString():new Date(x.at).toLocaleString(); out += `  gap-event ~${evt} | detected/resumed ${proc} | gap ${(x.gapMs/1000).toFixed(1)}s | excess ${(x.excessMs/1000).toFixed(1)}s | missed ${x.missedTicks||0} | ${x.visibility}/${x.focus}/${x.online} | previous refresh ${Number.isFinite(x.previousRefreshMs)?(x.previousRefreshMs/1000).toFixed(1)+"s":"n/a"}\n`; });
+        cds.slice(-10).forEach(x => { const evt=Number.isFinite(x.eventAt)?new Date(x.eventAt).toLocaleString():"n/a"; const proc=Number.isFinite(x.processedAt)?new Date(x.processedAt).toLocaleString():new Date(x.at).toLocaleString(); const a=x.stateAtPreviousCycleEnd||{},b=x.stateAtFirstMissedTick||{},c=x.stateAtResume||{visibility:x.visibility,focus:x.focus,online:x.online}; out += `  gap-event ~${evt} | detected/resumed ${proc} | gap ${(x.gapMs/1000).toFixed(1)}s | missed ${x.missedTicks||0} | prev-end ${a.visibility||"?"}/${a.focus||"?"} -> first-missed ${b.visibility||"?"}/${b.focus||"?"} -> resume ${c.visibility||"?"}/${c.focus||"?"}/${c.online||"?"} | previous refresh ${Number.isFinite(x.previousRefreshMs)?(x.previousRefreshMs/1000).toFixed(1)+"s":"n/a"}\n`; });
       }
     }
     const gov = ensureEvidenceGovernor();
     if (gov) {
-      out += `\n=== V43.12 RESEARCH EVIDENCE GOVERNOR ===\n`;
-      out += `Continuity segmentation threshold: >${(gov.gapThresholdMs/1000).toFixed(0)}s | current segment ${gov.currentSegmentId} | segments retained ${gov.segments.length} | qualifying segment gaps ${gov.gaps.length}${gov.initializedFromLegacy?" | NOTE: governor initialized from a pre-v43.12 saved run; historical segment reconstruction is incomplete":""}\n`;
+      out += `\n=== V43.13 RESEARCH EVIDENCE GOVERNOR ===\n`;
+      out += `Continuity segmentation threshold: >${(gov.gapThresholdMs/1000).toFixed(0)}s | current segment ${gov.currentSegmentId} | segments retained ${gov.segments.length} | qualifying segment gaps ${gov.gaps.length}${gov.initializedFromLegacy?" | NOTE: governor initialized from a pre-v43.13 saved run; historical segment reconstruction is incomplete":""}\n`;
       const allSegTrades = engine.allTradesEver || [];
       gov.segments.forEach(seg => {
         const segTrades = allSegTrades.filter(t => t.continuitySegmentIdAtEntry === seg.id);
@@ -5122,9 +5370,38 @@ function generateReport() {
       });
       if (gov.gaps.length) {
         out += `Segment boundaries / cadence gaps (eventAt is inferred first missed 30s tick; processedAt is detection/recovery):\n`;
-        gov.gaps.slice(-20).forEach(g => { out += `  Gap ${g.id}: eventAt ~${new Date(g.eventAt).toLocaleString()} | processedAt ${new Date(g.processedAt).toLocaleString()} | ${(g.gapMs/1000).toFixed(1)}s | segment ${g.priorSegmentId}->${g.nextSegmentId} | ${g.visibility}/${g.focus}/${g.online}\n`; });
+        gov.gaps.slice(-20).forEach(g => { const a=g.stateAtPreviousCycleEnd||{},b=g.stateAtFirstMissedTick||{},c=g.stateAtResume||{visibility:g.visibility,focus:g.focus,online:g.online}; out += `  Gap ${g.id}: eventAt ~${new Date(g.eventAt).toLocaleString()} | processedAt ${new Date(g.processedAt).toLocaleString()} | ${(g.gapMs/1000).toFixed(1)}s | segment ${g.priorSegmentId}->${g.nextSegmentId} | prev-end ${a.visibility||"?"}/${a.focus||"?"} -> first-missed ${b.visibility||"?"}/${b.focus||"?"} -> resume ${c.visibility||"?"}/${c.focus||"?"}/${c.online||"?"}\n`; });
       }
       out += `Lifecycle rows retained: ${Array.isArray(engine.lifecycleEvents)?engine.lifecycleEvents.length:0} (bounded to latest 200).\n`;
+
+      const dq=ensureDataQualityGovernor();
+      if(dq){
+        out += `Data-Quality Governor: ${dq.totalIncidents||0} incident(s) total | ${dq.incidents.length} retained | dropped old rows ${dq.droppedOldRows||0}.`+"\n";
+        dq.incidents.slice(-10).forEach(x=>{out+=`  DQ ${x.id}: ${new Date(x.eventAt).toLocaleString()} | segment ${x.segmentId??"n/a"} | ${x.failureType} | failed [${(x.failedCoins||[]).join(",")||"none"}] | stale [${(x.staleCoins||[]).join(",")||"none"}] | timeoutΔ ${x.timeoutDelta||0} | entries ${x.entriesDuringCycle||0} closes ${x.closedTradesDuringCycle||0}${x.tradeMutationOverlap?" | TRADE-MUTATION OVERLAP":""}`+"\n";});
+      }
+      const cc=ensureCollectionClock(); const wallH=engine&&engine.startedAt?(Date.now()-engine.startedAt)/3600000:0; const activeH=cc?(cc.activeMs||0)/3600000:0;
+      out += `Collection clock: wall ${wallH.toFixed(2)}h | active continuity ${activeH.toFixed(2)}h | inactive/gap ${(Math.max(0,wallH-activeH)).toFixed(2)}h.`+"\n";
+      const pt=Array.isArray(engine.cyclePhaseTimings)?engine.cyclePhaseTimings:[];
+      if(pt.length){const avg=k=>pt.reduce((n,x)=>n+(Number(x[k])||0),0)/pt.length;const mx=k=>Math.max(...pt.map(x=>Number(x[k])||0));out+=`Cycle phase timing (latest ${pt.length}): fetch avg ${avg("fetchMs").toFixed(1)}ms/max ${mx("fetchMs").toFixed(1)}ms | engine avg ${avg("engineMs").toFixed(1)}ms/max ${mx("engineMs").toFixed(1)}ms | final save avg ${avg("persistenceMs").toFixed(1)}ms/max ${mx("persistenceMs").toFixed(1)}ms.`+"\n";}
+      const el=ensureEventLoopHealth(); if(el)out+=`Visible event-loop heartbeat: ${el.visibleSamples||0} sample(s) | >=500ms lag ${el.visibleLagOver500ms||0} | >=2000ms lag ${el.visibleLagOver2000ms||0} | max ${(el.maxVisibleLagMs||0).toFixed(1)}ms.`+"\n";
+      const ar=ensureResearchArchiveStats(); if(ar)out+=`Resolved-shadow archive: IndexedDB ${ar.archivedRecords||0} archived record write(s), approx ${((ar.archivedApproxBytes||0)/1024).toFixed(1)}KB, local purges ${ar.localPurgedRecords||0}, write errors ${ar.writeErrors||0}, read errors ${ar.readErrors||0}${ar.lastError?` | last error ${ar.lastError}`:""}.`+"\n";
+
+      out += `\n=== V43.13 CLEAN-LIFETIME PERFORMANCE BY CONTINUITY SEGMENT ===\n`;
+      const allT=engine.allTradesEver||[];
+      gov.segments.forEach(seg=>{
+        const ts=allT.filter(t=>t.continuitySegmentIdAtEntry===seg.id&&t.continuitySegmentIdAtClose===seg.id&&!t.cadenceContaminated);
+        if(!ts.length)return;
+        const net=ts.reduce((n,t)=>n+(t.netPnl||0),0), wins=ts.filter(t=>t.result==="Win").length;
+        out+=`Segment ${seg.id}: ${ts.length} clean-lifetime closed | ${wins}W/${ts.length-wins}L | net $${net.toFixed(2)}`+"\n";
+        const by={};ts.forEach(t=>{const k=t.botLabel||t.bot||"?";if(!by[k])by[k]={n:0,w:0,net:0};by[k].n++;by[k].w+=t.result==="Win"?1:0;by[k].net+=t.netPnl||0;});
+        out+=`  strategy: `+Object.entries(by).map(([k,v])=>`${k} ${v.n} ${v.w}W/${v.n-v.w}L $${v.net.toFixed(2)}`).join(" | ")+"\n";
+        const dup=ts.filter(t=>t.sameCoinSameSideOtherBots&&t.sameCoinSameSideOtherBots.length), iso=ts.filter(t=>!(t.sameCoinSameSideOtherBots&&t.sameCoinSameSideOtherBots.length));
+        const nsum=a=>a.reduce((n,t)=>n+(t.netPnl||0),0);out+=`  duplicate thesis: ${dup.length} $${nsum(dup).toFixed(2)} | isolated ${iso.length} $${nsum(iso).toFixed(2)}`+"\n";
+        const scoreBins=[["80-100",x=>x>=80],["70-79",x=>x>=70&&x<80],["65-69",x=>x>=65&&x<70],["<65",x=>x<65]];
+        out+=`  score: `+scoreBins.map(([lab,fn])=>{const a=ts.filter(t=>Number.isFinite(t.entryScore)&&fn(t.entryScore));return`${lab} ${a.length} $${nsum(a).toFixed(2)}`;}).join(" | ")+"\n";
+        const d=ts.filter(t=>(t.bot||"")==="donchian"||(t.botLabel||"").includes("Donchian"));if(d.length){out+=`  Donchian wave: `+[["0",x=>x===0],["1-2",x=>x>=1&&x<=2],["3+",x=>x>=3]].map(([lab,fn])=>{const a=d.filter(t=>fn(t.recentSameDirection20mAtEntry||0));return`${lab}: ${a.length} $${nsum(a).toFixed(2)}`;}).join(" | ")+"\n";}
+      });
+      out += `\n`;
     }
     const hadCadenceGap = h.cadenceGapCount > 0;
     // P1-7 fix: the previous classifier only checked fullSyncPct>=99,
@@ -5152,6 +5429,11 @@ function generateReport() {
     out += `Research Evidence Integrity: ${researchClean ? "CLEAN — no skipped shadow samples or unresolved shadow-only 1m failures detected" : "INCOMPLETE / NOT CLEAN FOR FILTER-QUALITY BENCHMARK — see shadow/1m/build/startup integrity figures above"}\n`;
     const fundingClean = (h.fundingTimeouts || 0) === 0 && (h.fundingFailures || 0) === 0;
     out += `Funding+Momentum signal availability: ${fundingClean ? "Clean — no funding-data interruptions" : "Degraded — see Funding API reliability above; treat Funding+Momentum's evidence as incomplete for any interrupted period, independent of the Spot verdict above"}\n\n`;
+    const openSnap=currentOpenPositionsSnapshot();
+    out += `=== CURRENT OPEN POSITIONS SNAPSHOT ===\n`;
+    out += `${openSnap.length} position(s) open at report time.\n`;
+    openSnap.forEach(p=>{out+=`  ${p.botLabel} | ${p.coin} ${p.side} | opened ${new Date(p.openedAt).toLocaleString()} | segment ${p.continuitySegmentIdAtEntry??"n/a"} | entry $${p.entry} stop $${p.stop} target $${p.target}`+"\n";});
+    out += `\n`;
   }
 
   // v43.7: make the compact regime telemetry usable directly from the normal
@@ -5282,7 +5564,7 @@ function generateReport() {
   // than silently delete unresolved records.
   const shadowPauseHealth = ensureApiHealth();
   if (shadowPauseHealth && shadowPauseHealth.shadowResearchIncomplete) {
-    out += `SHADOW SAMPLING HALTED / RESEARCH INCOMPLETE: ${shadowPauseHealth.shadowCreationSkippedCount || 0} candidate shadow sample(s) were skipped after the emergency ceiling was reached. No existing pending record was deleted. This is sticky for the run: Reset is required before a clean filter-quality benchmark.\n`;
+    out += `SHADOW SAMPLING GAP / RESEARCH INCOMPLETE: ${shadowPauseHealth.shadowCreationSkippedCount || 0} candidate shadow sample(s) were skipped after the emergency ceiling was reached. No existing pending record was deleted. Run-level incompleteness is sticky; current sampling may resume in a later epoch after verified pressure relief, but Reset is required for a fully clean filter-quality benchmark.\n`;
     const byType = Object.entries(shadowPauseHealth.shadowSkippedByType || {}).map(([k,n]) => `${k}:${n}`).join(", ");
     const byBot = Object.entries(shadowPauseHealth.shadowSkippedByBot || {}).map(([k,n]) => `${k}:${n}`).join(", ");
     const byCoin = Object.entries(shadowPauseHealth.shadowSkippedByCoin || {}).sort((a,b)=>b[1]-a[1]).slice(0,20).map(([k,n]) => `${k}:${n}`).join(", ");
@@ -5687,13 +5969,15 @@ function generateReport() {
     uniqueStages.forEach(([k,label])=>{out += `  ${label}: reached ${bt.stageReach&&bt.stageReach[k]||0} | ever passed ${bt.stagePass&&bt.stagePass[k]||0}\n`;});
     const terminal = bt.terminalStage || {};
     out += `Ended-episode terminal stage: ${Object.keys(terminal).length ? Object.entries(terminal).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`${k} ${v}`).join(" | ") : "none yet"}\n`;
+  const bcf=ensureBollingerConfirmationCounterfactual();
+  if(bcf){const z=bcf.totals||{};out+=`v43.13 confirmation-alternative eligibility (unique episodes, research-only): 1 closed ${z.oneClosedEligibleEpisodes||0} | current 2 consecutive ${z.twoConsecutiveEligibleEpisodes||0} | 2-of-3 ${z.twoOfThreeEligibleEpisodes||0}. No live Bollinger rule changed.\n`;}
     out += `Bollinger permission-volume resolved outcome bins (research-only; closed-candle permission volRatio):\n`;
   const bv = engine.bollingerPermissionVolumeOutcomeStats || {};
   const bvOrder=["<0.50","0.50-0.79","0.80-0.89","0.90-0.99",">=1.00"];
-  if (!Object.keys(bv).length) out += `  No resolved permission-volume shadows yet under v43.12 metadata.\n`;
+  if (!Object.keys(bv).length) out += `  No resolved permission-volume shadows yet under v43.13 metadata.\n`;
   bvOrder.forEach(k=>{const q=bv[k];if(!q||!q.n)return;const wr=(q.wins+q.losses)?q.wins/(q.wins+q.losses)*100:0;const avg=q.hypNetCount?q.hypNetSum/q.hypNetCount:null;out += `  ${k}x: ${q.n} resolved | ${q.wins}W/${q.losses}L/${q.timeouts} timeout${q.ambiguous?`/${q.ambiguous} ambiguous`:""} | would-win ${fmt(wr,1)}% | avg hypothetical ${avg==null?"n/a":"$"+fmt(avg)}\n`;});
 
-  } else out += `Unique signal-episode research: no data yet (starts on a fresh v43.12 run).\n`;
+  } else out += `Unique signal-episode research: no data yet (starts on a fresh v43.13 run).\n`;
 
 
   out += `\n=== V43.11 TARGET-CAP CUMULATIVE PAIRED OUTCOMES ===\n`;
@@ -5729,7 +6013,7 @@ function generateReport() {
     const gs = storageGrowthStats(engine);
     if (gs) {
       const recentRunwayH = gs.bytesPerHour > 0 ? remain / gs.bytesPerHour : null;
-      out += `Recent growth (last ${gs.windowHours.toFixed(1)}h, ${gs.snapshotCount} hourly snapshots): ${(gs.bytesPerHour/1024).toFixed(1)} KB/hour | ${gs.shadowsPerHour.toFixed(1)} genuine shadows/hour | recent-rate runway ${recentRunwayH!==null?recentRunwayH.toFixed(1)+"h":"n/a (flat or shrinking)"}.\n`;
+      out += `Recent growth (last ${gs.windowHours.toFixed(1)} wall h, ${gs.snapshotCount} hourly snapshots): ${(gs.bytesPerHour/1024).toFixed(1)} KB/wall-hour | ${Number.isFinite(gs.bytesPerActiveHour)?(gs.bytesPerActiveHour/1024).toFixed(1)+" KB/active-hour":"active rate n/a"} | ${gs.shadowsPerHour.toFixed(1)} genuine shadows/wall-hour${Number.isFinite(gs.shadowsPerActiveHour)?` | ${gs.shadowsPerActiveHour.toFixed(1)} shadows/active-hour`:""} | recent wall-rate runway ${recentRunwayH!==null?recentRunwayH.toFixed(1)+"h":"n/a (flat or shrinking)"}.\n`;
     } else {
       out += `Recent growth: not enough hourly snapshots yet (need 2+, one per hour) — will appear after the run has been active a couple of hours.\n`;
     }
@@ -5753,7 +6037,7 @@ function generateReport() {
   out += `\n=== V43.11 INSTRUMENTATION COMPLETENESS ===\n`;
   const ih=engine.instrumentationHealth||{},installed=engine.instrumentationVersion===V439_INSTRUMENTATION_VERSION;
   out += `Data/shadow evidence integrity is separate from instrumentation completeness. Package ${installed?"INSTALLED":"MISMATCH / OLD RUN"} (${engine.instrumentationVersion||"none"}); runtime research errors ${ih.errors||0}${ih.byModule&&Object.keys(ih.byModule).length?` | ${Object.entries(ih.byModule).map(([k,v])=>`${k}:${v}`).join(", ")}`:""}.\n`;
-  out += `Expected modules: closed-volume reversal state; timestamp-safe Donchian re-arm; cumulative shadow dedup + attribution counters; score sub-check + de-correlated research outcomes; market-wave outcomes; chronological profit-protection counterfactuals; cumulative target-cap paired registry; storage compaction/reporting; cadence root-cause diagnostics; unique Bollinger episode funnel; v43.12 Evidence Governor; lifecycle telemetry; eventAt/processedAt provenance; structured JSON/CSV export; protective-exit expectancy; Bollinger permission-volume outcome bins.\n`;
+  out += `Expected modules: closed-volume reversal state; timestamp-safe Donchian re-arm; cumulative shadow dedup + attribution counters; score sub-check + de-correlated research outcomes; market-wave outcomes; chronological profit-protection counterfactuals; cumulative target-cap paired registry; storage compaction/reporting; cadence root-cause diagnostics; unique Bollinger episode funnel; v43.13 Evidence/Data-Quality Governors; three-state cadence provenance; cycle phase timing; visible event-loop lag; active collection clock; IndexedDB resolved-shadow archive; resumable sampling epochs; structured JSON/CSV export; protective-exit expectancy; Bollinger permission-volume and confirmation-alternative research; per-segment analytics.\n`;
 
   out += `\n=== BY COIN, BY STRATEGY ===\n`;
   // v33 fix: was scoped to coinList only, silently dropping any removed
@@ -5840,13 +6124,20 @@ function downloadReport() {
 function buildResearchExportSnapshot() {
   if (!engine) return null;
   return {
-    schema: "V43.12-RESEARCH-EXPORT-1",
+    schema: "V43.13-RESEARCH-EXPORT-1",
     exportedAt: Date.now(),
     build: { tag: BUILD_TAG, parentLabel: BUILD_PARENT_LABEL, parentSha256: BUILD_PARENT_SHA256, parentMd5: BUILD_PARENT_MD5, approvedParentRecord: BUILD_APPROVED_PARENT_RECORD },
-    retentionNote: "Resolved shadow detail may be compacted/dropped after exact-once folding; cumulative aggregates below remain authoritative for outcomes.",
+    retentionNote: "Resolved shadow detail is exact-once folded, archived to IndexedDB, then old archived local detail may be purged. Exports merge current local detail with the current run's IndexedDB archive; cumulative aggregates remain authoritative for outcomes.",
     run: { startedAt: engine.startedAt, startBuildTag: engine.startBuildTag, startCoinList: engine.startCoinList, startToggles: engine.startToggles, startAutoAddOn: engine.startAutoAddOn, benchmarkLock: engine.benchmarkLock },
     evidenceGovernor: engine.evidenceGovernor || null,
     lifecycleEvents: engine.lifecycleEvents || [],
+    dataQualityGovernor: engine.dataQualityGovernor || null,
+    collectionClock: engine.collectionClock || null,
+    cyclePhaseTimings: engine.cyclePhaseTimings || [],
+    eventLoopHealth: engine.eventLoopHealth || null,
+    browserStorageTelemetry: engine.browserStorageTelemetry || null,
+    researchArchiveStats: engine.researchArchiveStats || null,
+    currentOpenPositions: currentOpenPositionsSnapshot(),
     apiHealth: engine.apiHealth || null,
     storageCapacityDiagnostics: engine.storageCapacityDiagnostics || null,
     trades: engine.allTradesEver || [],
@@ -5858,7 +6149,7 @@ function buildResearchExportSnapshot() {
       shadowTotals: engine.shadowTotals || {}, shadowTotalsByStrategy: engine.shadowTotalsByStrategy || {}, vetoTotals: engine.vetoTotals || {},
       vetoAttributionOutcomeStats: engine.vetoAttributionOutcomeStats || {}, vetoRegimeOutcomeStats: engine.vetoRegimeOutcomeStats || {},
       protectiveExitOutcomeStats: engine.protectiveExitOutcomeStats || {}, bollingerPermissionVolumeOutcomeStats: engine.bollingerPermissionVolumeOutcomeStats || {},
-      bollingerEpisodeResearch: engine.bollingerEpisodeResearch || {}, targetCapEventRegistry: engine.targetCapEventRegistry || {}, shadowCompactionStats: engine.shadowCompactionStats || {}
+      bollingerEpisodeResearch: engine.bollingerEpisodeResearch || {}, bollingerConfirmationCounterfactual: engine.bollingerConfirmationCounterfactual || {}, targetCapEventRegistry: engine.targetCapEventRegistry || {}, shadowCompactionStats: engine.shadowCompactionStats || {}
     }
   };
 }
@@ -5867,9 +6158,16 @@ function triggerDownload(filename, content, mime) {
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = filename; a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
 }
-function downloadResearchJson() {
+async function downloadResearchJson() {
   if (refreshInProgress) { alert("Research export unavailable while a refresh cycle is processing."); return; }
   const snap = buildResearchExportSnapshot(); if (!snap) { alert("Start the test first."); return; }
+  try {
+    const archived=await readArchivedShadowsForCurrentRun();
+    const isCont=x=>x.vetoType==="early_exit_continuation"||x.vetoType==="regime_flip_continuation";
+    snap.shadows=mergeShadowDetail(shadowTrades,archived.filter(x=>!isCont(x)));
+    snap.continuationShadows=mergeShadowDetail(continuationShadows,archived.filter(isCont));
+    snap.archiveExport={recordsRead:archived.length,runId:engine.researchRunId};
+  } catch(e) { alert("Research archive read failed; JSON export was not created because it would be incomplete. " + (e.message||e)); return; }
   triggerDownload("strategy_research_" + new Date().toISOString().slice(0,10) + ".json", JSON.stringify(snap, null, 2), "application/json");
 }
 function csvCell(v) {
@@ -5877,15 +6175,17 @@ function csvCell(v) {
   const s = typeof v === "object" ? JSON.stringify(v) : String(v);
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
 }
-function downloadResearchCsv() {
+async function downloadResearchCsv() {
   if (refreshInProgress) { alert("Research export unavailable while a refresh cycle is processing."); return; }
   if (!engine) { alert("Start the test first."); return; }
   const cols = ["recordType","id","at","eventAt","processedAt","openedAt","closedAt","bot","coin","side","status","resolution","result","vetoType","reason","entry","stop","target","exitPrice","netPnl","hypotheticalPnl","actualPnl","deltaVsActual","vetoAttribution","vetoRegimeBucket","vetoVolRatio","meanReversionFailureStage","continuitySegmentIdAtEntry","continuitySegmentIdAtResolution","cadenceContaminated","recoveredAfterCadenceGap","cadenceGapId","decisionCycleId"];
   const rows = [];
   const push = (type,o) => rows.push(cols.map(c => csvCell(c === "recordType" ? type : o[c])).join(","));
   (engine.allTradesEver || []).forEach(t => push("trade", { ...t, at:t.closedAt, continuitySegmentIdAtResolution:t.continuitySegmentIdAtClose }));
-  (shadowTrades || []).forEach(x => push("shadow", x));
-  (continuationShadows || []).forEach(x => push("continuation_shadow", x));
+  let archived=[]; try{archived=await readArchivedShadowsForCurrentRun();}catch(e){alert("Research archive read failed; CSV export was not created because it would be incomplete. " + (e.message||e));return;}
+  const isCont=x=>x.vetoType==="early_exit_continuation"||x.vetoType==="regime_flip_continuation";
+  mergeShadowDetail(shadowTrades,archived.filter(x=>!isCont(x))).forEach(x => push("shadow", x));
+  mergeShadowDetail(continuationShadows,archived.filter(isCont)).forEach(x => push("continuation_shadow", x));
   (vetoLog || []).forEach(v => push("veto", { ...v, at:v.t, vetoType:v.type, continuitySegmentIdAtEntry:v.continuitySegmentId }));
   const csv = cols.join(",") + "\n" + rows.join("\n");
   triggerDownload("strategy_records_" + new Date().toISOString().slice(0,10) + ".csv", csv, "text/csv");
@@ -5904,6 +6204,16 @@ async function refresh() {
   if (refreshInProgress) return;
   refreshInProgress = true;
   const cycleStart = Date.now();
+  const cyclePerfStart = (typeof performance!=="undefined"?performance.now():Date.now());
+  let fetchPhaseEndPerf = cyclePerfStart, enginePhaseEndPerf = cyclePerfStart, persistencePhaseMs = null;
+  const cycleLifecycleStart = currentLifecycleState();
+  const healthAtCycleStart = engine ? ensureApiHealth() : null;
+  const timeoutCountBefore = healthAtCycleStart ? (healthAtCycleStart.timeouts||0) : 0;
+  const closedTradesBefore = engine && Array.isArray(engine.allTradesEver) ? engine.allTradesEver.length : 0;
+  const segAtCycleStart = currentEvidenceSegmentId();
+  const govAtCycleStart = engine ? ensureEvidenceGovernor() : null;
+  const segRowAtStart = govAtCycleStart && govAtCycleStart.segments.find(x=>x.id===segAtCycleStart);
+  const entriesBefore = segRowAtStart ? (segRowAtStart.realEntries||0) : 0;
   // P0-3 fix: captured before any await in this function — checked again
   // at key checkpoints below. If Start/Restart/Reset happens while this
   // cycle is still in flight, engineGeneration will have moved on, and this
@@ -5928,6 +6238,8 @@ async function refresh() {
       // the very next cycle, not just within one uninterrupted session.
       const EXPECTED_CADENCE_MS = REFRESH_MS;
       const GAP_WARN_MS = REFRESH_MS * 1.5; // enough jitter tolerance, but a sustained ~60s cadence is not "clean 30s" coverage
+      const previousCycleStartForClock = h.lastCycleStartedAt;
+      updateCollectionClock(cycleStart, previousCycleStartForClock);
       if (h.lastCycleStartedAt) {
         const gap = cycleStart - h.lastCycleStartedAt;
         h.cadenceGapMaxMs = Math.max(h.cadenceGapMaxMs || 0, gap);
@@ -5936,10 +6248,10 @@ async function refresh() {
           h.cadenceGapTotalMs = (h.cadenceGapTotalMs || 0) + Math.max(0, gap - EXPECTED_CADENCE_MS);
           const missed = Math.max(0, Math.floor(gap / EXPECTED_CADENCE_MS) - 1);
           h.missedTickEstimate = (h.missedTickEstimate || 0) + missed;
-          const visibility = (typeof document !== "undefined" && document.visibilityState) ? document.visibilityState : "unknown";
-          let focused = "unknown";
-          try { focused = document.hasFocus() ? "focused" : "not-focused"; } catch (_) {}
-          const online = (typeof navigator !== "undefined" && typeof navigator.onLine === "boolean") ? (navigator.onLine ? "online" : "offline") : "unknown";
+          const resumeState = currentLifecycleState();
+          const visibility = resumeState.visibility, focused = resumeState.focus, online = resumeState.online;
+          const previousState = lifecycleStateAt(Number.isFinite(h.lastCycleCompletedAt) ? h.lastCycleCompletedAt : h.lastCycleStartedAt);
+          const firstMissedState = lifecycleStateAt(h.lastCycleStartedAt + EXPECTED_CADENCE_MS);
           const prevDur = h.refreshDurationsMs && h.refreshDurationsMs.length ? h.refreshDurationsMs[h.refreshDurationsMs.length - 1] : null;
           if (!Array.isArray(h.cadenceGapDiagnostics)) h.cadenceGapDiagnostics = [];
           const gapEventAt = h.lastCycleStartedAt + EXPECTED_CADENCE_MS;
@@ -5954,9 +6266,12 @@ async function refresh() {
             focus: focused,
             online,
             previousRefreshMs: Number.isFinite(prevDur) ? prevDur : null,
+            stateAtPreviousCycleEnd: previousState,
+            stateAtFirstMissedTick: firstMissedState,
+            stateAtResume: resumeState,
             longGap: gap >= 120000,
           });
-          if (gap > EVIDENCE_GAP_SEGMENT_MS) recordEvidenceCadenceGap(h.lastCycleStartedAt, cycleStart, gap, missed, { visibility, focus: focused, online });
+          if (gap > EVIDENCE_GAP_SEGMENT_MS) recordEvidenceCadenceGap(h.lastCycleStartedAt, cycleStart, gap, missed, { visibility, focus: focused, online, stateAtPreviousCycleEnd:previousState, stateAtFirstMissedTick:firstMissedState, stateAtResume:resumeState });
           if (h.cadenceGapDiagnostics.length > 200) h.cadenceGapDiagnostics = h.cadenceGapDiagnostics.slice(-200);
           if (!h.cadenceGapByVisibility || typeof h.cadenceGapByVisibility !== "object") h.cadenceGapByVisibility = {};
           if (!h.cadenceGapByFocus || typeof h.cadenceGapByFocus !== "object") h.cadenceGapByFocus = {};
@@ -5995,13 +6310,14 @@ async function refresh() {
     // starts on the next cycle — no special handling needed.
     const cycleCoinList = coinList.slice();
     let anySuccess = false, lastError = null, trackedSucceeded = 0, trackedFailed = 0;
+    const cycleFailures = [];
     await Promise.all(cycleCoinList.map(async (ticker) => {
       if (!state[ticker]) state[ticker] = { closes: [], price: null };
       try {
         state[ticker] = await analyzeCoin(ticker, "tracked");
         anySuccess = true;
         trackedSucceeded++;
-      } catch (e) { lastError = e.message; if (state[ticker]) { state[ticker].error = lastError; state[ticker].stale = true; } trackedFailed++; }
+      } catch (e) { lastError = e.message; if (state[ticker]) { state[ticker].error = lastError; state[ticker].stale = true; } trackedFailed++; cycleFailures.push({coin:ticker,error:lastError||"unknown",type:(/timeout/i.test(lastError||"")?"timeout":/HTTP 429/i.test(lastError||"")?"http429":/HTTP 418/i.test(lastError||"")?"http418":/HTTP 5\d\d/i.test(lastError||"")?"http5xx":/blocked until/i.test(lastError||"")?"api_blocked":"fetch_error")}); }
     }));
 
     // v37 fix (item 18): manual removal deleted state[coin] outright — if
@@ -6034,7 +6350,9 @@ async function refresh() {
     // to a run that no longer exists (or isn't the current one). Abandon
     // the cycle here rather than run the engine step against the wrong run.
     if (myGeneration !== engineGeneration) return; // finally below still resets refreshInProgress
+    fetchPhaseEndPerf = (typeof performance!=="undefined"?performance.now():Date.now());
     if (engine) await runEngineStep();
+    enginePhaseEndPerf = (typeof performance!=="undefined"?performance.now():Date.now());
 
     // v41: cycle completion + duration + stale-coin telemetry, computed from
     // data this refresh already produced — no new API calls needed.
@@ -6069,7 +6387,25 @@ async function refresh() {
     // safeLocalStorageSet (inside saveEngine) already handles a quota
     // failure by entering degraded mode rather than throwing, so this can't
     // become a retry loop.
-    if (engine) saveEngine();
+    if (engine) {
+      const h2=ensureApiHealth();
+      const staleCoins=cycleCoinList.filter(t=>state[t]&&state[t].stale);
+      const segNow=currentEvidenceSegmentId(); const govNow=ensureEvidenceGovernor(); const segNowRow=govNow&&govNow.segments.find(x=>x.id===segNow);
+      const entryDelta=(segNow===segAtCycleStart&&segNowRow)?Math.max(0,(segNowRow.realEntries||0)-entriesBefore):0;
+      const closeDelta=Math.max(0,(engine.allTradesEver||[]).length-closedTradesBefore);
+      const timeoutDelta=h2?Math.max(0,(h2.timeouts||0)-timeoutCountBefore):0;
+      if(trackedFailed>0||staleCoins.length||timeoutDelta>0){
+        const types=[...new Set(cycleFailures.map(x=>x.type).concat(staleCoins.length?["stale_state"]:[]).concat(timeoutDelta?["timeout_counter_delta"]:[]))];
+        recordDataQualityIncident({eventAt:cycleStart,processedAt:Date.now(),segmentId:segNow,failureType:types.join("+")||"partial_cycle",failureTypes:types,failedCoins:cycleFailures.map(x=>x.coin),failures:cycleFailures,staleCoins,timeoutDelta,trackedRequested:cycleCoinList.length,trackedSucceeded,trackedFailed,cycleDurationMs:Date.now()-cycleStart,stateAtCycleStart:cycleLifecycleStart,stateAtCycleEnd:currentLifecycleState(),entriesDuringCycle:entryDelta,closedTradesDuringCycle:closeDelta,tradeMutationOverlap:(entryDelta+closeDelta)>0});
+      }
+      await sampleBrowserStorageEstimate();
+      h2.lastCycleCompletedAt=Date.now(); // persist the cycle-end timestamp in the authoritative final save
+      const persistPerfStart=(typeof performance!=="undefined"?performance.now():Date.now());
+      saveEngine();
+      const persistPerfEnd=(typeof performance!=="undefined"?performance.now():Date.now());
+      persistencePhaseMs=persistPerfEnd-persistPerfStart;
+      recordCyclePhaseTiming({at:cycleStart,segmentId:currentEvidenceSegmentId(),fetchMs:fetchPhaseEndPerf-cyclePerfStart,engineMs:enginePhaseEndPerf-fetchPhaseEndPerf,persistenceMs:persistencePhaseMs,totalMs:(typeof performance!=="undefined"?performance.now():Date.now())-cyclePerfStart,visibility:cycleLifecycleStart.visibility,focus:cycleLifecycleStart.focus,trackedFailed});
+    }
     document.getElementById("banner").innerHTML = startupIntegrityBlocked
       ? `<div class="banner" style="background:#7f1d1d; border-color:#dc2626;">STARTUP DATA INTEGRITY BLOCK — one or more saved run/research records could not be parsed safely. Existing data is not a clean benchmark baseline. Use verified Reset before starting a new benchmark.</div>`
       : runBuildMismatch()
@@ -6077,7 +6413,7 @@ async function refresh() {
         : persistenceDegraded
           ? `<div class="banner" style="background:#7f1d1d; border-color:#dc2626;">${storageProblemLabel()} — new entries paused. Existing positions still managed. Export after the current refresh completes. Unsaved changes may be lost if the page closes.</div>`
           : (engine && engine.apiHealth && engine.apiHealth.shadowResearchIncomplete)
-            ? `<div class="banner" style="background:#7f1d1d; border-color:#dc2626;">RESEARCH EVIDENCE INCOMPLETE — shadow capacity was exceeded and at least one counterfactual sample was skipped. Shadow sampling is halted for this run; Reset is required before a clean filter-quality benchmark.</div>`
+            ? `<div class="banner" style="background:#7f1d1d; border-color:#dc2626;">RESEARCH EVIDENCE INCOMPLETE — at least one counterfactual sample was skipped. ${engine.apiHealth.shadowCreationCurrentlyPaused ? "Shadow sampling is CURRENTLY PAUSED for storage pressure." : "Shadow sampling has resumed in a later epoch after pressure relief, but the earlier evidence gap remains permanent for this run."} Reset is required for a fully clean filter-quality benchmark.</div>`
             : (anySuccess ? "" : `<div class="banner">Live price fetch failed (${lastError}). Check your internet connection.</div>`);
     document.getElementById("statusLine").textContent = "Last updated " + new Date().toLocaleTimeString() + " · auto-refresh every 30s";
     renderCards(); renderEngine(); renderScanner();
@@ -6775,7 +7111,7 @@ if (autoTrackControl) autoTrackControl.addEventListener("change", () => {
   if (engine) logConfigEvent("auto_add_toggle", autoTrackControl.checked ? "ON" : "OFF");
 });
 
-// v43.12: browser lifecycle evidence. These are bounded, research-only events.
+// v43.13: browser lifecycle evidence. These are bounded, research-only events.
 document.addEventListener("visibilitychange", () => recordLifecycleEvent("visibilitychange"));
 window.addEventListener("focus", () => recordLifecycleEvent("focus"));
 window.addEventListener("blur", () => recordLifecycleEvent("blur"));
@@ -6783,8 +7119,10 @@ window.addEventListener("pagehide", () => recordLifecycleEvent("pagehide"));
 window.addEventListener("pageshow", () => recordLifecycleEvent("pageshow"));
 window.addEventListener("online", () => recordLifecycleEvent("online"));
 window.addEventListener("offline", () => recordLifecycleEvent("offline"));
+setInterval(visibleEventLoopHeartbeat, VISIBLE_HEARTBEAT_MS);
 
 renderToggles(); renderChips(); renderEngine();
+if (engine) { ensureResearchRunId(); ensureResearchArchiveStats(); queueResolvedShadowArchival(); }
 if (startupIntegrityBlocked) {
   document.getElementById("banner").innerHTML = `<div class="banner" style="background:#7f1d1d; border-color:#dc2626;">STARTUP DATA INTEGRITY BLOCK — corrupted/unreadable persisted run or research data detected (${startupIntegrityWarnings.map(x => x.key).join(", ")}). Use verified Reset before starting a clean benchmark.</div>`;
 }
