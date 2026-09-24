@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-<title>Crypto Research Lab v1.3</title>
+<title>Crypto Research Lab v1.4</title>
 <style>
 :root{--bg:#071018;--panel:#0c1823;--panel2:#102130;--line:#1e3547;--text:#e7f0f7;--muted:#8fa6b7;--good:#58d68d;--bad:#ff7675;--warn:#f5c451;--accent:#67b7ff;--cyan:#58d8e6;--purple:#b89cff;--shadow:0 12px 30px rgba(0,0,0,.28)}
 *{box-sizing:border-box}body{margin:0;background:linear-gradient(180deg,#061019,#07131d 50%,#071018);color:var(--text);font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,Arial,sans-serif}button,input,textarea,select{font:inherit}.wrap{max-width:1500px;margin:0 auto;padding:18px}.top{display:flex;gap:14px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;margin-bottom:16px}.title h1{font-size:25px;margin:0 0 4px}.title p{margin:0;color:var(--muted);max-width:850px}.badge{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);background:#0b1822;border-radius:999px;padding:6px 10px;color:var(--muted);font-size:12px}.dot{width:8px;height:8px;border-radius:50%;background:var(--bad)}.dot.on{background:var(--good);box-shadow:0 0 0 4px rgba(88,214,141,.1)}.actions{display:flex;gap:8px;flex-wrap:wrap}.btn{border:1px solid var(--line);background:#102231;color:var(--text);border-radius:10px;padding:9px 12px;cursor:pointer}.btn:hover{border-color:#3f6682}.btn.primary{background:#123f62;border-color:#276b9b}.btn.danger{background:#3a171b;border-color:#6e2931}.btn.small{padding:6px 9px;font-size:12px}.notice{background:#12212c;border:1px solid #2a465a;border-left:4px solid var(--accent);padding:11px 13px;border-radius:10px;margin-bottom:15px;color:#cfe0ec}.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:12px}.card{grid-column:span 3;background:linear-gradient(180deg,var(--panel),#091620);border:1px solid var(--line);border-radius:14px;padding:14px;box-shadow:var(--shadow);min-width:0}.card.wide{grid-column:span 6}.card.full{grid-column:1/-1}.card h2{font-size:14px;margin:0 0 9px;color:#c9d8e3}.metric{font-size:24px;font-weight:700;letter-spacing:-.5px}.sub{color:var(--muted);font-size:12px;margin-top:3px}.good{color:var(--good)}.bad{color:var(--bad)}.warn{color:var(--warn)}.accent{color:var(--accent)}.cyan{color:var(--cyan)}.purple{color:var(--purple)}.section{margin-top:16px}.sectionHead{display:flex;align-items:end;justify-content:space-between;gap:10px;margin-bottom:8px}.sectionHead h2{margin:0;font-size:18px}.sectionHead p{margin:0;color:var(--muted);font-size:12px}.tableWrap{overflow:auto;border:1px solid var(--line);border-radius:12px;background:#091620}.table{width:100%;border-collapse:collapse;min-width:900px}.table th,.table td{padding:9px 10px;border-bottom:1px solid #162a39;text-align:right;white-space:nowrap}.table th{position:sticky;top:0;background:#0f202d;color:#9eb5c5;font-size:11px;text-transform:uppercase;letter-spacing:.04em;z-index:1}.table th:first-child,.table td:first-child{text-align:left}.table tr:last-child td{border-bottom:0}.table tr:hover td{background:#0c1b27}.stateTag{display:inline-block;border:1px solid #2b4658;background:#102331;border-radius:999px;padding:2px 7px;font-size:11px}.split{display:grid;grid-template-columns:1fr 1fr;gap:12px}.box{border:1px solid var(--line);border-radius:12px;padding:12px;background:#091620}.box h3{margin:0 0 8px;font-size:13px}.kv{display:grid;grid-template-columns:minmax(140px,1fr) auto;gap:6px 10px}.kv div:nth-child(odd){color:var(--muted)}.config textarea{width:100%;min-height:80px;background:#07131c;border:1px solid var(--line);color:var(--text);border-radius:10px;padding:9px;resize:vertical}.config input{width:100%;background:#07131c;border:1px solid var(--line);color:var(--text);border-radius:9px;padding:8px}.progress{height:9px;background:#07131c;border:1px solid var(--line);border-radius:99px;overflow:hidden}.progress>i{display:block;height:100%;width:0;background:linear-gradient(90deg,#4aa5e5,#62d3c8)}.log{max-height:260px;overflow:auto;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;background:#050d13;border:1px solid var(--line);border-radius:10px;padding:9px}.log div{padding:3px 0;border-bottom:1px dashed #142430}.log div:last-child{border-bottom:0}.footer{margin:18px 0 6px;color:var(--muted);font-size:11px}.pillrow{display:flex;gap:7px;flex-wrap:wrap}.pill{padding:5px 8px;border-radius:999px;background:#0c1c28;border:1px solid var(--line);font-size:11px;color:#a9bdcb}.muted{color:var(--muted)}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}@media(max-width:1000px){.card{grid-column:span 6}.card.wide{grid-column:1/-1}.split{grid-template-columns:1fr}}@media(max-width:600px){.wrap{padding:11px}.card{grid-column:1/-1}.actions{width:100%}.btn{flex:1}.metric{font-size:21px}.title h1{font-size:21px}}
@@ -13,10 +13,10 @@
 <div class="wrap">
   <div class="top">
     <div class="title">
-      <h1>Crypto Research Lab v1.3</h1>
+      <h1>Crypto Research Lab v1.4</h1>
       <p>Independent research-only companion to the trading dashboard. It records market breadth and 5-minute leverage/flow state (LFS) observations. It cannot place or alter paper trades.</p>
       <div class="pillrow" style="margin-top:9px">
-        <span class="pill">Schema LAB-v1.2.0</span><span class="pill">Revision v1.3</span><span class="pill">Persistence: IndexedDB</span><span class="pill">LFS: BTC / ETH / SOL</span><span class="pill">5m closed intervals</span><span class="pill">No API key</span><span class="pill">No trading actions</span>
+        <span class="pill">Schema LAB-v1.4.0</span><span class="pill">Revision v1.4</span><span class="pill">Persistence: IndexedDB</span><span class="pill">LFS: BTC / ETH / SOL</span><span class="pill">5m closed intervals</span><span class="pill">No API key</span><span class="pill">No trading actions</span>
       </div>
     </div>
     <div>
@@ -25,7 +25,7 @@
     </div>
   </div>
 
-  <div class="notice"><b>v1.3 storage reliability:</b> Lab state now persists in IndexedDB as a single atomic snapshot instead of two full localStorage A/B copies, removing the confirmed double-buffer quota failure seen in the long Mac run. The 3.50 MB figure below is a research-state compaction threshold, not a browser localStorage quota. <b>Exports:</b> JSON, LFS CSV and Breadth CSV are available separately. <b>Research logic unchanged:</b> v1.2-r1 timestamp-unique collection bookkeeping, gap-safe episode continuity, wake/suspension recovery, API pacing/cooldowns, evidence rules and the exact 24-coin breadth cohort are unchanged. This file still has no trading authority.</div>
+  <div class="notice"><b>v1.4 long-run reliability:</b> IndexedDB remains the persistence backend after surviving the v1.3 80-hour Mac run with zero write errors. v1.4 removes the premature 3.50 MB admission dead-zone that skipped late samples, raises the application compaction threshold to 8 MB, and removes the historical basis request that produced every API failure in that run. Basis is now an explicitly versioned mark/index-derived diagnostic from the already-fetched premium snapshot; LFS state classification does not use basis. <b>Research logic frozen:</b> LFS classification, episode rules, forward horizons, Breadth classification, evidence governor and the fixed 24-coin cohort are unchanged. This file has no trading authority.</div>
 
   <div class="actions" style="margin-bottom:14px">
     <button class="btn primary" id="startBtn">Start / Resume Lab</button>
@@ -43,7 +43,7 @@
     <div class="card"><h2>API health</h2><div class="metric good" id="apiPct">—</div><div class="sub" id="apiSub">No calls yet</div></div>
     <div class="card"><h2>Evidence integrity</h2><div class="metric good" id="integrity">COMPLETE</div><div class="sub" id="integritySub">No skipped stored evidence</div></div>
     <div class="card"><h2>Collection completeness</h2><div class="metric" id="collectionPct">—</div><div class="sub" id="collectionSub">Waiting for first closed bucket</div></div>
-    <div class="card"><h2>Research state size</h2><div class="metric" id="storageNow">0 KB</div><div class="sub" id="storageSub">IndexedDB • compaction threshold 3.50 MB</div></div>
+    <div class="card"><h2>Research state size</h2><div class="metric" id="storageNow">0 KB</div><div class="sub" id="storageSub">IndexedDB • compaction threshold 8.00 MB</div></div>
     <div class="card"><h2>Storage growth</h2><div class="metric" id="growth">—</div><div class="sub" id="runway">Runway: —</div></div>
     <div class="card"><h2>Last LFS bucket</h2><div class="metric" style="font-size:17px" id="lastLfs">—</div><div class="sub" id="nextLfs">Next: —</div></div>
     <div class="card"><h2>Last Breadth bucket</h2><div class="metric" style="font-size:17px" id="lastBreadth">—</div><div class="sub" id="nextBreadth">Next: —</div></div>
@@ -77,12 +77,12 @@
     <div class="box">
       <h3>Storage / integrity policy</h3>
       <div class="kv">
-        <div>Soft policy ceiling</div><div>3.50 MB</div>
+        <div>Application compaction threshold</div><div>8.00 MB</div>
         <div>Pending observations</div><div>Lossless priority</div>
-        <div>Resolved measurements</div><div>Compact numeric records</div>
+        <div>Resolved measurements</div><div>Raw detail retained through 72h target; cumulative aggregates preserved</div>
         <div>Old verbose logs</div><div>Rolling</div>
         <div>Skipped scientific sample</div><div>Latches INCOMPLETE</div>
-        <div>Safe resolved-detail compaction</div><div>Does not corrupt evidence</div>
+        <div>Safe resolved-detail compaction</div><div>Target 6 MB; protect ≥3000 LFS + ≥800 Breadth rows</div>
       </div>
       <div class="progress" style="margin-top:10px"><i id="storageBar"></i></div>
     </div>
@@ -107,21 +107,26 @@
     <div class="log" id="log"></div>
   </div>
 
-  <div class="footer">Crypto Research Lab v1.3 • IndexedDB persistence • Public Binance market-data endpoints only • No orders, keys, wallets or account access • All times displayed locally; scientific timestamps stored in UTC milliseconds.</div>
+  <div class="footer">Crypto Research Lab v1.4 • IndexedDB persistence • Public Binance market-data endpoints only • No orders, keys, wallets or account access • All times displayed locally; scientific timestamps stored in UTC milliseconds.</div>
 </div>
 <script>
 'use strict';
 (async () => {
-  const SCHEMA='LAB-v1.2.0';
-  const LAB_REVISION='v1.3';
-  // v1.3: persistence moved off localStorage after a real long-run quota failure.
-  // Web Storage kept two near-full A/B snapshots, so a ~1.87 MB Lab state consumed
-  // ~3.74 MB before any other same-origin data. IndexedDB stores one atomic snapshot
-  // and has a materially larger browser-managed quota. Research logic is unchanged.
-  const DB_NAME='cryptoResearchLab_v1_3', DB_VERSION=1, DB_STORE='state', DB_KEY='main';
+  const SCHEMA='LAB-v1.4.0';
+  const LAB_REVISION='v1.4';
+  // v1.4: v1.3 proved IndexedDB persistence over >80h, but two independent long-run
+  // reliability issues remained: a 98%-of-3.50MB admission dead-zone skipped samples
+  // before compaction could run, and the historical basis endpoint produced every API
+  // failure in the run. Keep research classification semantics frozen; fix collection
+  // plumbing and version the auxiliary basis provenance explicitly.
+  const DB_NAME='cryptoResearchLab_v1_4', DB_VERSION=1, DB_STORE='state', DB_KEY='main';
+  const LEGACY_IDB_DBS=['cryptoResearchLab_v1_3'];
   const LEGACY_LOCAL_KEYS=['cryptoResearchLab_v1_2_A','cryptoResearchLab_v1_2_B','cryptoResearchLab_v1_2_PTR'];
-  // This remains an application compaction threshold, NOT a browser quota claim.
-  const SOFT_CEILING=3.5*1024*1024, TARGET_AFTER_COMPACT=2.75*1024*1024;
+  // Application compaction policy only; this is NOT a browser quota claim. A clean 72h
+  // cohort fits below this threshold based on the v1.3 80h run.
+  const SOFT_CEILING=8*1024*1024, TARGET_AFTER_COMPACT=6*1024*1024;
+  const MIN_RETAIN_LFS=3000, MIN_RETAIN_BREADTH=800;
+  const BASIS_SOURCE='premium-mark-index-derived-v1';
   const LFS_SYMBOLS=['BTCUSDT','ETHUSDT','SOLUSDT'];
   // Exact established 24-coin main-dashboard benchmark cohort.
   const DEFAULT_BREADTH=['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT','ADAUSDT','XRPUSDT','DOGEUSDT','AVAXUSDT','LINKUSDT','DOTUSDT','ATOMUSDT','UNIUSDT','AAVEUSDT','NEARUSDT','ARBUSDT','OPUSDT','SUIUSDT','LTCUSDT','ETCUSDT','FILUSDT','INJUSDT','TAOUSDT','ENAUSDT','PEPEUSDT'];
@@ -157,10 +162,11 @@
     pendingLfs:[],resolvedLfs:[],pendingBreadth:[],resolvedBreadth:[],
     agg:{lfs:{},lfsEpisodes:{},breadth:{}},
     episodes:{lastBySymbol:{},breaks:0,lastBreakAt:0,lastBreakReason:null},
-    api:{calls:0,ok:0,fail:0,timeout:0,retries:0,http429:0,http418:0,http5xx:0,networkErrors:0,backoffMs:0,rateLimitedUntil:0,blockedUntil:0,lastRequestAt:0,byEndpoint:{}},
+    api:{calls:0,ok:0,fail:0,timeout:0,retries:0,http429:0,http418:0,http5xx:0,networkErrors:0,backoffMs:0,rateLimitedUntil:0,blockedUntil:0,lastRequestAt:0,byEndpoint:{},incidents:[]},
     integrity:{complete:true,skippedLfs:0,skippedBreadth:0,writeErrors:0,duplicatePrevented:0,rawResolvedCompactions:0,reconstructionMismatches:0,lastError:null},
     collection:{lfs:freshCollection(LFS_MS),breadth:freshCollection(BREADTH_MS)},
-    logs:[],storageSamples:[],scheduler:{ticks:0,lastTick:0,lastGapMs:0,maxGapMs:0,gapsOver90s:0,suspensions:0,lastSuspensionGapMs:0,wakeSettles:0}
+    diagnostics:{basisSource:BASIS_SOURCE,lifecycle:[],storageEstimate:{t:0,usage:null,quota:null},build:LAB_REVISION},
+    logs:[],storageSamples:[],scheduler:{ticks:0,lastTick:0,lastGapMs:0,maxGapMs:0,gapsOver90s:0,suspensions:0,lastSuspensionGapMs:0,wakeSettles:0,incidents:[]}
   });
 
   function revive(value){
@@ -191,6 +197,9 @@
     const db=await openDb();
     return new Promise((resolve,reject)=>{const tx=db.transaction(DB_STORE,'readwrite');tx.oncomplete=()=>resolve(true);tx.onerror=()=>reject(tx.error||new Error('IndexedDB clear failed'));tx.onabort=()=>reject(tx.error||new Error('IndexedDB clear aborted'));tx.objectStore(DB_STORE).clear();});
   }
+  async function deleteLegacyIndexedDb(){
+    await Promise.allSettled(LEGACY_IDB_DBS.map(name=>new Promise(resolve=>{try{const r=indexedDB.deleteDatabase(name);r.onsuccess=r.onerror=r.onblocked=()=>resolve()}catch{resolve()}})));
+  }
   async function load(){
     try{return revive(await idbGetState())||freshState()}
     catch(e){persistenceFailed=true;persistenceFailureText=`IndexedDB load failed: ${e?.message||e}`;const s=freshState();s.integrity.complete=false;s.integrity.writeErrors=1;s.integrity.lastError=persistenceFailureText;return s}
@@ -199,6 +208,17 @@
 
   function log(msg,level='info'){
     S.logs.push({t:now(),msg,level}); if(S.logs.length>120)S.logs.splice(0,S.logs.length-120); renderLog();
+  }
+  function pushBounded(arr,item,max=200){arr.push(item);if(arr.length>max)arr.splice(0,arr.length-max)}
+  function recordApiIncident(item){pushBounded(S.api.incidents,item,200)}
+  function recordLifecycle(type){
+    if(!S.diagnostics)S.diagnostics={basisSource:BASIS_SOURCE,lifecycle:[],storageEstimate:{t:0,usage:null,quota:null},build:LAB_REVISION};
+    if(!Array.isArray(S.diagnostics.lifecycle))S.diagnostics.lifecycle=[];
+    pushBounded(S.diagnostics.lifecycle,{t:now(),type,visibility:document.visibilityState,focused:document.hasFocus(),online:navigator.onLine},200);
+  }
+  async function refreshBrowserStorageEstimate(){
+    if(!navigator.storage?.estimate)return;
+    try{const e=await navigator.storage.estimate();S.diagnostics.storageEstimate={t:now(),usage:Number.isFinite(e.usage)?e.usage:null,quota:Number.isFinite(e.quota)?e.quota:null}}catch{}
   }
   function endpointStat(name,ok,timeout=false){
     S.api.calls++; if(ok)S.api.ok++; else S.api.fail++; if(timeout)S.api.timeout++;
@@ -231,12 +251,13 @@
     if(now()<S.api.rateLimitedUntil)throw new Error(`HTTP 429 cooldown until ${new Date(S.api.rateLimitedUntil).toISOString()}`);
     let lastErr=null;
     for(let attempt=0;attempt<=MAX_RETRIES;attempt++){
-      const ctrl=new AbortController();const id=setTimeout(()=>ctrl.abort(),FETCH_TIMEOUT);
+      const ctrl=new AbortController();const started=now();const id=setTimeout(()=>ctrl.abort(),FETCH_TIMEOUT);
       try{
         const r=await fetch(url,{signal:ctrl.signal,cache:'no-store'});
         if(r.ok){const j=await r.json();endpointStat(name,true);return j}
         endpointStat(name,false,false);
         const status=r.status, hdrWait=retryAfterMs(r);
+        recordApiIncident({t:now(),name,status,attempt,durationMs:now()-started,visibility:document.visibilityState,focused:document.hasFocus(),online:navigator.onLine});
         if(status===418){S.api.http418++;const wait=hdrWait??DEFAULT_418_COOLDOWN_MS;S.api.blockedUntil=Math.max(S.api.blockedUntil,now()+wait);throw new Error(`HTTP 418; hard cooldown ${Math.ceil(wait/1000)}s`)}
         if(status===429){
           S.api.http429++;const wait=hdrWait??(DEFAULT_429_COOLDOWN_MS+Math.random()*3000);
@@ -250,6 +271,7 @@
         lastErr=e;const to=e?.name==='AbortError';
         if(to||e instanceof TypeError){
           endpointStat(name,false,to);S.api.networkErrors++;
+          recordApiIncident({t:now(),name,status:to?'timeout':'network',attempt,durationMs:now()-started,visibility:document.visibilityState,focused:document.hasFocus(),online:navigator.onLine,message:String(e?.message||e)});
           if(attempt<MAX_RETRIES){const wait=BACKOFF_BASE_MS*(2**attempt)+Math.random()*500;S.api.retries++;S.api.backoffMs+=wait;await sleep(wait);continue}
         }
         throw e;
@@ -288,8 +310,8 @@
   function compactIfNeeded(serialized){
     let size=bytes(serialized); if(size<=SOFT_CEILING)return serialized;
     let changed=false;
-    while(size>TARGET_AFTER_COMPACT && S.resolvedLfs.length>1800){S.resolvedLfs.shift();S.integrity.rawResolvedCompactions++;changed=true;serialized=JSON.stringify(S);size=bytes(serialized)}
-    while(size>TARGET_AFTER_COMPACT && S.resolvedBreadth.length>600){S.resolvedBreadth.shift();S.integrity.rawResolvedCompactions++;changed=true;serialized=JSON.stringify(S);size=bytes(serialized)}
+    while(size>TARGET_AFTER_COMPACT && S.resolvedLfs.length>MIN_RETAIN_LFS){S.resolvedLfs.shift();S.integrity.rawResolvedCompactions++;changed=true;serialized=JSON.stringify(S);size=bytes(serialized)}
+    while(size>TARGET_AFTER_COMPACT && S.resolvedBreadth.length>MIN_RETAIN_BREADTH){S.resolvedBreadth.shift();S.integrity.rawResolvedCompactions++;changed=true;serialized=JSON.stringify(S);size=bytes(serialized)}
     if(changed)log(`Storage compaction removed old resolved raw-detail records; cumulative pre-registered aggregates retained.`, 'warn');
     return serialized;
   }
@@ -346,7 +368,6 @@
       oi:`${FUT}/futures/data/openInterestHist?symbol=${qs(symbol)}&period=5m&limit=20`,
       taker:`${FUT}/futures/data/takerlongshortRatio?symbol=${qs(symbol)}&period=5m&limit=20`,
       ls:`${FUT}/futures/data/globalLongShortAccountRatio?symbol=${qs(symbol)}&period=5m&limit=20`,
-      basis:`${FUT}/futures/data/basis?pair=${qs(symbol)}&contractType=PERPETUAL&period=5m&limit=20`,
       premium:`${FUT}/fapi/v1/premiumIndex?symbol=${qs(symbol)}`
     };
     const names=Object.keys(urls);const results=await Promise.allSettled(names.map(n=>getJson(urls[n],n)));
@@ -358,18 +379,21 @@
     const oiCur=latestLE(oiArr,'timestamp',bucket), oiIdx=oiCur?oiArr.indexOf(oiCur):-1, oiPrev=oiIdx>0?oiArr[oiIdx-1]:null;
     const oiVal=oiCur?+oiCur.sumOpenInterestValue:NaN, oiPrevVal=oiPrev?+oiPrev.sumOpenInterestValue:NaN;
     const oiDelta=Number.isFinite(oiVal)&&Number.isFinite(oiPrevVal)&&oiPrevVal!==0?(oiVal/oiPrevVal-1)*100:NaN;
-    const tak=latestLE(D.taker,'timestamp',bucket), ls=latestLE(D.ls,'timestamp',bucket), bas=latestLE(D.basis,'timestamp',bucket);
+    const tak=latestLE(D.taker,'timestamp',bucket), ls=latestLE(D.ls,'timestamp',bucket);
     const prem=D.premium&&typeof D.premium==='object'?D.premium:null;
+    const mark=prem?+prem.markPrice:NaN,index=prem?+prem.indexPrice:NaN;
+    const basis=Number.isFinite(mark)&&Number.isFinite(index)?mark-index:NaN;
+    const basisRate=Number.isFinite(basis)&&Number.isFinite(index)&&index!==0?basis/index:NaN;
     const rawLast=Array.isArray(D.spot)&&D.spot.length?D.spot.at(-1):null;
     const availablePrice=rawLast?+rawLast[4]:sp.close;
     const availableAt=now(), lagMs=Math.max(0,availableAt-bucket), timingClean=lagMs<=MAX_LFS_LAG_MS;
-    const missing=[];[['oi',oiCur],['oiPrev',oiPrev],['taker',tak],['ls',ls],['basis',bas],['premium',prem]].forEach(([k,v])=>{if(!v)missing.push(k)});
+    const missing=[];[['oi',oiCur],['oiPrev',oiPrev],['taker',tak],['ls',ls],['premium',prem]].forEach(([k,v])=>{if(!v)missing.push(k)});if(!Number.isFinite(basisRate))missing.push('basisDerived');
     const clean=missing.length===0&&timingClean;
     const state=classifyLfs(sp.ret,oiDelta,tak?+tak.buySellRatio:NaN);
     const record={
       id:`LFS|${symbol}|${bucket}`,s:symbol,t:bucket,created:availableAt,availableAt,availablePrice,lagMs,timingClean,state,clean,missing,
-      m:{ret:sp.ret,close:sp.close,vol:sp.volume,atr:sp.atrPct,rv:sp.rvPct,oi:oiVal,oiD:oiDelta,taker:tak?+tak.buySellRatio:NaN,buy:tak?+tak.buyVol:NaN,sell:tak?+tak.sellVol:NaN,ls:ls?+ls.longShortRatio:NaN,longA:ls?+ls.longAccount:NaN,shortA:ls?+ls.shortAccount:NaN,basis:bas?+bas.basis:NaN,basisRate:bas?+bas.basisRate:NaN,mark:prem?+prem.markPrice:NaN,index:prem?+prem.indexPrice:NaN,funding:prem?+prem.lastFundingRate:NaN,nextFunding:prem?+prem.nextFundingTime:NaN,premiumTime:prem?+prem.time:NaN},
-      q:{spotBucket:bucket,oiTime:oiCur?+oiCur.timestamp:null,takerTime:tak?+tak.timestamp:null,lsTime:ls?+ls.timestamp:null,basisTime:bas?+bas.timestamp:null},o:{}
+      m:{ret:sp.ret,close:sp.close,vol:sp.volume,atr:sp.atrPct,rv:sp.rvPct,oi:oiVal,oiD:oiDelta,taker:tak?+tak.buySellRatio:NaN,buy:tak?+tak.buyVol:NaN,sell:tak?+tak.sellVol:NaN,ls:ls?+ls.longShortRatio:NaN,longA:ls?+ls.longAccount:NaN,shortA:ls?+ls.shortAccount:NaN,basis,basisRate,basisSource:BASIS_SOURCE,mark,index,funding:prem?+prem.lastFundingRate:NaN,nextFunding:prem?+prem.nextFundingTime:NaN,premiumTime:prem?+prem.time:NaN},
+      q:{spotBucket:bucket,oiTime:oiCur?+oiCur.timestamp:null,takerTime:tak?+tak.timestamp:null,lsTime:ls?+ls.timestamp:null,basisTime:prem?+prem.time:null,basisSource:BASIS_SOURCE},o:{}
     };
     return {record,bars:sp.bars};
   }
@@ -449,7 +473,6 @@
       try{
         const f=await fetchLfs(sym,targetBucket),r=f.record;spotCache[sym]=f.bars;
         if(hasLfsId(r.id)){S.integrity.duplicatePrevented++;continue}
-        if(estimatedSize()>SOFT_CEILING*0.98){S.integrity.skippedLfs++;S.integrity.complete=false;log(`Skipped ${r.id}: storage safety ceiling.`,'error');continue}
         assignEpisode(r);r.bucketComplete=null;S.pendingLfs.push(r);added++;log(`LFS ${sym} ${r.state} | ${fmtPct(r.m.ret)} | ΔOI ${fmtPct(r.m.oiD)} | lag ${(r.lagMs/1000).toFixed(1)}s${r.clean?'':' | DEGRADED '+[...r.missing,...(!r.timingClean?['timing']:[])].join(',')}`)
       }catch(e){log(`LFS ${sym} fetch failed: ${e.message||e}`,'error');if(apiCoolingDown())break}
     }
@@ -514,7 +537,6 @@
     const cors=[];for(let i=0;i<same.length;i++)for(let j=i+1;j<same.length;j++){const c=pearson(same[i].series,same[j].series);if(Number.isFinite(c))cors.push(c)}
     const coverage=same.length/syms.length, availableAt=now(), lagMs=Math.max(0,availableAt-targetBucket), timingClean=lagMs<=MAX_BREADTH_LAG_MS, clean=coverage>=.9&&timingClean;const state=classifyBreadth(up,med,btc,alt);
     const r={id,t:targetBucket,created:availableAt,availableAt,lagMs,timingClean,state,clean,m:{up,down:1-up,med,btc,eth,alt,follow,disp:stdev(rets),corr:mean(cors),coverage},closes:Object.fromEntries(same.map(x=>[x.s,x.close])),o:{}};
-    if(estimatedSize()>SOFT_CEILING*.98){S.integrity.skippedBreadth++;S.integrity.complete=false;log(`Skipped breadth ${targetBucket}: storage safety ceiling.`,'error');setCollectionStatus('breadth',targetBucket,'partial','storage ceiling');return history}
     S.pendingBreadth.push(r);S.last.breadthBucket=Math.max(S.last.breadthBucket,targetBucket);S.last.breadthRun=now();setCollectionStatus('breadth',targetBucket,'complete',`${same.length}/${syms.length} symbols`);log(`Breadth ${state} | ${(up*100).toFixed(0)}% up | median ${fmtPct(med)} | corr ${fmtNum(r.m.corr,2)} | lag ${(lagMs/1000).toFixed(1)}s${clean?'':' | DEGRADED'}`);return history
   }
 
@@ -548,7 +570,7 @@
     if(busy)return;busy=true;
     try{
       const t=now();S.scheduler.ticks++;let gap=0;
-      if(S.scheduler.lastTick){gap=t-S.scheduler.lastTick;S.scheduler.lastGapMs=gap;S.scheduler.maxGapMs=Math.max(S.scheduler.maxGapMs,gap);if(gap>WAKE_GAP_MS){S.scheduler.gapsOver90s++;S.scheduler.suspensions++;S.scheduler.lastSuspensionGapMs=gap}}
+      if(S.scheduler.lastTick){gap=t-S.scheduler.lastTick;S.scheduler.lastGapMs=gap;S.scheduler.maxGapMs=Math.max(S.scheduler.maxGapMs,gap);if(gap>WAKE_GAP_MS){S.scheduler.gapsOver90s++;S.scheduler.suspensions++;S.scheduler.lastSuspensionGapMs=gap;pushBounded(S.scheduler.incidents,{t,gapMs:gap,visibility:document.visibilityState,focused:document.hasFocus(),online:navigator.onLine},200)}}
       S.scheduler.lastTick=t;
       let lb=closedBoundary(LFS_MS),bb=closedBoundary(BREADTH_MS);
       if(gap>WAKE_GAP_MS){
@@ -590,7 +612,7 @@
     const api=S.api.calls?S.api.ok/S.api.calls*100:NaN;$('#apiPct').textContent=Number.isFinite(api)?`${api.toFixed(2)}%`:'—';$('#apiPct').className='metric '+(api>=98?'good':api>=90?'warn':'bad');$('#apiSub').textContent=S.api.calls?`${S.api.ok}/${S.api.calls} successful • ${S.api.timeout} timeouts`:'No calls yet';
     $('#integrity').textContent=S.integrity.complete?'COMPLETE':'INCOMPLETE';$('#integrity').className='metric '+(S.integrity.complete?'good':'bad');$('#integritySub').textContent=`Skipped stored LFS ${S.integrity.skippedLfs} • Breadth ${S.integrity.skippedBreadth} • Write errors ${S.integrity.writeErrors}`;
     const lp=collectionPct('lfs'),bp=collectionPct('breadth'),overall=Number.isFinite(lp)&&Number.isFinite(bp)?Math.min(lp,bp):Number.isFinite(lp)?lp:bp;$('#collectionPct').textContent=Number.isFinite(overall)?`${overall.toFixed(2)}%`:'—';$('#collectionPct').className='metric '+(!Number.isFinite(overall)?'':overall>=99?'good':overall>=95?'warn':'bad');$('#collectionSub').textContent=`LFS ${Number.isFinite(lp)?lp.toFixed(1)+'%':'—'} (${S.collection.lfs.complete}/${S.collection.lfs.expected}) • missing ${S.collection.lfs.missing}, partial ${S.collection.lfs.partial} | Breadth ${Number.isFinite(bp)?bp.toFixed(1)+'%':'—'} (${S.collection.breadth.complete}/${S.collection.breadth.expected})`;
-    const ss=storageStats();$('#storageNow').textContent=fmtBytes(ss.b);$('#storageSub').textContent=`IndexedDB • ${((ss.b/SOFT_CEILING)*100).toFixed(1)}% of 3.50 MB compaction threshold • compacted raw ${S.integrity.rawResolvedCompactions}`;$('#storageBar').style.width=`${clamp(ss.b/SOFT_CEILING*100,0,100)}%`;
+    const ss=storageStats();$('#storageNow').textContent=fmtBytes(ss.b);$('#storageSub').textContent=`IndexedDB • ${((ss.b/SOFT_CEILING)*100).toFixed(1)}% of 8.00 MB compaction threshold • compacted raw ${S.integrity.rawResolvedCompactions}`;$('#storageBar').style.width=`${clamp(ss.b/SOFT_CEILING*100,0,100)}%`;
     $('#growth').textContent=Number.isFinite(ss.rate)?`${ss.rate>=0?'+':''}${fmtBytes(Math.abs(ss.rate))}/h`:'—';$('#runway').textContent=Number.isFinite(ss.runway)&&ss.runway>0?`Runway: ${ss.runway<48?ss.runway.toFixed(1)+' h':(ss.runway/24).toFixed(1)+' days'}`:'Runway: stable / not enough history';
     $('#lastLfs').textContent=fmtTime(S.last.lfsBucket);$('#nextLfs').textContent=`Last fetch ${fmtTime(S.last.lfsRun)}`;$('#lastBreadth').textContent=fmtTime(S.last.breadthBucket);$('#nextBreadth').textContent=`Last fetch ${fmtTime(S.last.breadthRun)}`;
 
@@ -600,7 +622,7 @@
 
     $('#breadthSymbols').value=S.config.breadthSymbols.join(' ');$('#breadthSymbols').disabled=!!S.config.breadthFrozenAt;$('#saveUniverseBtn').disabled=!!S.config.breadthFrozenAt;$('#freezeUniverseBtn').disabled=!!S.config.breadthFrozenAt;$('#universeStatus').textContent=S.config.breadthFrozenAt?`FROZEN ${fmtTime(S.config.breadthFrozenAt)} • ${S.config.breadthSymbols.length} symbols`:`Editable • ${S.config.breadthSymbols.length} symbols • freeze before benchmark collection`;
     const d=S.scheduler,runtimeH=S.startedAt?(now()-S.startedAt)/3600000:0,gate=runtimeH>=72&&collectionPct('lfs')>=99&&S.integrity.complete&&S.integrity.reconstructionMismatches===0&&S.api.http429===0&&S.api.http418===0;
-    $('#diag').innerHTML=`<div>Persistence backend</div><div class="good">IndexedDB single snapshot</div><div>Scheduler ticks</div><div>${d.ticks}</div><div>Last observed gap</div><div>${(d.lastGapMs/1000).toFixed(1)}s</div><div>Longest observed gap</div><div>${(d.maxGapMs/1000).toFixed(1)}s</div><div>Suspensions &gt;90 sec</div><div class="${d.suspensions?'warn':'good'}">${d.suspensions||0}</div><div>Wake settle events</div><div>${d.wakeSettles||0}</div><div>Episode continuity breaks</div><div>${S.episodes.breaks||0}</div><div>Duplicates prevented</div><div>${S.integrity.duplicatePrevented}</div><div>429 / 418</div><div class="${S.api.http429||S.api.http418?'warn':'good'}">${S.api.http429} / ${S.api.http418}</div><div>Retries</div><div>${S.api.retries} (${Math.round(S.api.backoffMs/1000)}s backoff)</div><div>LFS symbols</div><div>${S.config.lfsSymbols.join(', ')}</div><div>5-coin expansion gate</div><div class="${gate?'good':'warn'}">${gate?'PASS':'WAIT'} • ${runtimeH.toFixed(1)}/72h • LFS ${Number.isFinite(collectionPct('lfs'))?collectionPct('lfs').toFixed(2):'—'}%</div>`;
+    $('#diag').innerHTML=`<div>Persistence backend</div><div class="good">IndexedDB single snapshot</div><div>Basis source</div><div>${S.diagnostics?.basisSource||BASIS_SOURCE}</div><div>Scheduler ticks</div><div>${d.ticks}</div><div>Last observed gap</div><div>${(d.lastGapMs/1000).toFixed(1)}s</div><div>Longest observed gap</div><div>${(d.maxGapMs/1000).toFixed(1)}s</div><div>Suspensions &gt;90 sec</div><div class="${d.suspensions?'warn':'good'}">${d.suspensions||0}</div><div>Wake settle events</div><div>${d.wakeSettles||0}</div><div>Episode continuity breaks</div><div>${S.episodes.breaks||0}</div><div>Duplicates prevented</div><div>${S.integrity.duplicatePrevented}</div><div>429 / 418</div><div class="${S.api.http429||S.api.http418?'warn':'good'}">${S.api.http429} / ${S.api.http418}</div><div>Retries</div><div>${S.api.retries} (${Math.round(S.api.backoffMs/1000)}s backoff)</div><div>LFS symbols</div><div>${S.config.lfsSymbols.join(', ')}</div><div>5-coin expansion gate</div><div class="${gate?'good':'warn'}">${gate?'PASS':'WAIT'} • ${runtimeH.toFixed(1)}/72h • LFS ${Number.isFinite(collectionPct('lfs'))?collectionPct('lfs').toFixed(2):'—'}%</div>`;
     renderLog();
   }
   function renderLog(){const el=$('#log');if(!el)return;el.innerHTML=S.logs.slice().reverse().map(x=>`<div class="${x.level==='error'?'bad':x.level==='warn'?'warn':''}">[${new Date(x.t).toLocaleTimeString()}] ${escapeHtml(x.msg)}</div>`).join('')||'<div class="muted">No events yet.</div>'}
@@ -609,8 +631,8 @@
   function download(name,text,type='application/json'){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
   function exportJson(){const pkg={exportedAt:now(),schema:SCHEMA,revision:LAB_REVISION,note:'Research only. No trading authority.',state:S};download(`crypto_research_lab_${new Date().toISOString().replace(/[:.]/g,'-')}.json`,JSON.stringify(pkg,null,2))}
   function exportCsv(){
-    const rows=[['id','symbol','bucket_utc','available_at_utc','lag_ms','timing_clean','bucket_complete','episode_id','episode_start','state','clean','spot_ret_pct','atr_pct','rv_pct','oi_value','oi_delta_pct','taker_ratio','global_ls','basis_rate','funding','ret_15m','mfe_15m','mae_15m','ret_30m','ret_60m','ret_120m']];
-    [...S.resolvedLfs,...S.pendingLfs].sort((a,b)=>a.t-b.t).forEach(r=>rows.push([r.id,r.s,new Date(r.t).toISOString(),r.availableAt?new Date(r.availableAt).toISOString():'',r.lagMs??'',r.timingClean??'',r.bucketComplete??'',r.episodeId??'',r.episodeStart??'',r.state,r.clean,r.m.ret,r.m.atr,r.m.rv,r.m.oi,r.m.oiD,r.m.taker,r.m.ls,r.m.basisRate,r.m.funding,r.o?.[15]?.ret??'',r.o?.[15]?.mfe??'',r.o?.[15]?.mae??'',r.o?.[30]?.ret??'',r.o?.[60]?.ret??'',r.o?.[120]?.ret??'']));
+    const rows=[['id','symbol','bucket_utc','available_at_utc','lag_ms','timing_clean','bucket_complete','episode_id','episode_start','state','clean','spot_ret_pct','atr_pct','rv_pct','oi_value','oi_delta_pct','taker_ratio','global_ls','basis_rate','basis_source','basis_time_utc','funding','ret_15m','mfe_15m','mae_15m','ret_30m','ret_60m','ret_120m']];
+    [...S.resolvedLfs,...S.pendingLfs].sort((a,b)=>a.t-b.t).forEach(r=>rows.push([r.id,r.s,new Date(r.t).toISOString(),r.availableAt?new Date(r.availableAt).toISOString():'',r.lagMs??'',r.timingClean??'',r.bucketComplete??'',r.episodeId??'',r.episodeStart??'',r.state,r.clean,r.m.ret,r.m.atr,r.m.rv,r.m.oi,r.m.oiD,r.m.taker,r.m.ls,r.m.basisRate,r.m.basisSource??r.q?.basisSource??'',r.q?.basisTime?new Date(r.q.basisTime).toISOString():'',r.m.funding,r.o?.[15]?.ret??'',r.o?.[15]?.mfe??'',r.o?.[15]?.mae??'',r.o?.[30]?.ret??'',r.o?.[60]?.ret??'',r.o?.[120]?.ret??'']));
     download(`lfs_${new Date().toISOString().slice(0,10)}.csv`,rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n'),'text/csv')
   }
   function exportBreadthCsv(){
@@ -628,15 +650,17 @@
     if(timer){clearInterval(timer);timer=null}
     try{
       await idbClearState();
-      // Remove only obsolete Lab v1.2 Web Storage keys. Dashboard tm2_* keys are untouched.
+      // Remove only obsolete Research Lab persistence. Dashboard tm2_* keys are untouched.
+      await deleteLegacyIndexedDb();
       for(const k of LEGACY_LOCAL_KEYS){try{localStorage.removeItem(k)}catch{}}
-      persistenceFailed=false;persistenceFailureText=null;persistQueue=Promise.resolve();S=freshState();await flushSave();render();log('Research Lab reset. IndexedDB state is fresh; legacy Lab localStorage keys cleared.')
+      persistenceFailed=false;persistenceFailureText=null;persistQueue=Promise.resolve();S=freshState();await flushSave();render();log('Research Lab reset. v1.4 IndexedDB state is fresh; obsolete Lab persistence cleared; Dashboard tm2_* data untouched.')
     }catch(e){handlePersistenceFailure(e)}
   }
 
   $('#startBtn').addEventListener('click',start);$('#stopBtn').addEventListener('click',stop);$('#runNowBtn').addEventListener('click',()=>cycle(true));$('#exportBtn').addEventListener('click',exportJson);$('#csvBtn').addEventListener('click',exportCsv);$('#breadthCsvBtn').addEventListener('click',exportBreadthCsv);$('#resetBtn').addEventListener('click',reset);$('#saveUniverseBtn').addEventListener('click',saveUniverse);$('#freezeUniverseBtn').addEventListener('click',freezeUniverse);
-  setInterval(()=>{$('#clock').textContent=new Date().toLocaleString()},1000);
-  save();render();
+  document.addEventListener('visibilitychange',()=>recordLifecycle('visibilitychange'));window.addEventListener('focus',()=>recordLifecycle('focus'));window.addEventListener('blur',()=>recordLifecycle('blur'));window.addEventListener('online',()=>recordLifecycle('online'));window.addEventListener('offline',()=>recordLifecycle('offline'));window.addEventListener('pageshow',()=>recordLifecycle('pageshow'));window.addEventListener('pagehide',()=>recordLifecycle('pagehide'));
+  setInterval(()=>{$('#clock').textContent=new Date().toLocaleString()},1000);setInterval(()=>refreshBrowserStorageEstimate(),5*60*1000);
+  recordLifecycle('loaded');refreshBrowserStorageEstimate();save();render();
   if(S.running){timer=setInterval(()=>cycle(false),30000);setTimeout(()=>cycle(false),800)}
 })();
 </script>
