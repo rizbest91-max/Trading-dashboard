@@ -1,25 +1,27 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- v44.0 SINGLE-FILE DEPLOYMENT
-This deployment embeds assets/v44.css and all three JS modules directly.
+<!-- v44.1 SINGLE-FILE DEPLOYMENT
+Everything required by the dashboard is embedded in this one index.html file.
 Approved parent record preserved below for provenance only:
 {
-  "file": "index_v43_13.html",
-  "bytes": 498858,
-  "md5": "b322ff19e551dc0125a54a7e121d436a",
-  "sha256": "c88c74ea36b10bf0fa9d92bf4cc3228af3c4bd3f4998193082276fc8c792be3a",
+  "file": "index.html",
+  "build": "v44.0 single-file deployed parent",
+  "bytes": 553260,
+  "lines": 7376,
+  "md5": "9ad78e51592af8927aafa6c1d8eb6347",
+  "sha256": "9c366ba6eaa7bf3265057bc8dc67c9c751dd456bbea32b9c74524e26234d14a0",
   "approvedAt": "2026-09-26",
-  "purpose": "Exact frozen v43.13 parent for v44.0 core-engine extraction and regression comparison."
+  "purpose": "Exact deployed v44.0 single-file parent for targeted v44.1 research-integrity patch."
 }
 -->
 
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
 <meta name="theme-color" content="#05070d" />
-<title>NEXUS // Crypto Edge Lab v44.0</title>
+<title>NEXUS // Crypto Edge Lab v44.1</title>
 <style>
-/* v44.0 SINGLE-FILE EMBEDDED STYLES */
+/* v44.1 SINGLE-FILE EMBEDDED STYLES */
 
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
@@ -237,13 +239,13 @@ button.danger{background:rgba(72,22,39,.72);border-color:rgba(255,102,135,.35);c
       <a href="#sec-research">▤ <span>Exports</span></a>
       <a href="#sec-live">◌ <span>Coins</span></a>
     </nav>
-    <div class="side-foot">v44.0<br/>Edge discovery first.<br/>Paper trading second.</div>
+    <div class="side-foot">v44.1<br/>Edge discovery first.<br/>Paper trading second.</div>
   </aside>
 
   <main class="main-stage"><div class="wrap">
     <header class="top-command" id="sec-overview">
       <div><div class="command-eyebrow">Research command centre</div><div class="command-title">Crypto Edge Lab</div><div class="command-sub">Raw signal → episode → forward outcome → matched baseline → validation. Legacy bots are optional.</div></div>
-      <div class="command-actions"><span class="pulse-pill" id="edgeAuditStatus">EDGE AUDIT READY</span><button id="refreshBtn">↻ Sync now</button></div>
+      <div class="command-actions"><span class="pulse-pill" id="edgeAuditStatus">EDGE AUDIT READY</span><button class="primary" id="overviewStartBtn">▶ Start Edge Audit</button><button id="overviewEdgeJsonBtn">Edge JSON</button><button id="overviewEdgeCsvBtn">Edge CSV</button><button id="refreshBtn">↻ Sync now</button></div>
     </header>
     <div class="status" id="statusLine">Loading market state...</div><div id="banner"></div>
 
@@ -262,14 +264,14 @@ button.danger{background:rgba(72,22,39,.72);border-color:rgba(255,102,135,.35);c
     <section class="section-block" id="sec-edge">
       <div class="section-head"><div><div class="section-kicker">Edge audit</div><div class="section-name">Three hypotheses. Zero inherited authority.</div><div class="section-desc">Events are measured before stop/target/exit logic. Episode starts are the research unit; 300 discovery episodes then fresh validation remains the governance target.</div></div><div class="edge-toolbar"><button id="edgeExportJsonBtn">Export Edge JSON</button><button id="edgeExportCsvBtn">Export Edge CSV</button><label class="file-import"><button>Import Lab v1.4</button><input id="labImportInput" type="file" accept=".json,application/json"/></label></div></div>
       <div class="hypothesis-grid">
-        <article class="hyp-card hyp-trend"><div class="hyp-icon">01 // TREND</div><div class="hyp-name">Trend / Breakout</div><div class="hyp-thesis">Donchian episode starts. SMA and MACD become explanatory features, not independent votes. Lab-style market structure is attached at the event.</div><div class="hyp-metrics"><div class="hyp-metric"><label>Episodes</label><strong id="edgeTrendEpisodes">0</strong></div><div class="hyp-metric"><label>Resolved</label><strong id="edgeTrendResolved">0</strong></div><div class="hyp-metric"><label>4h edge</label><strong id="edgeTrendEdge">—</strong></div></div><div class="evidence-track"><div class="evidence-fill" id="edgeTrendProgress"></div></div><span class="phase-tag" id="edgeTrendPhase">DESCRIPTIVE</span><div class="context-sub" id="edgeTrendMatched">matched baseline building</div></article>
-        <article class="hyp-card hyp-mean"><div class="hyp-icon">02 // REVERSION</div><div class="hyp-name">Mean Reversion</div><div class="hyp-thesis">Raw Bollinger breach episodes. RSI, regime, volatility and volume are recorded as context so we can test whether each adds information.</div><div class="hyp-metrics"><div class="hyp-metric"><label>Episodes</label><strong id="edgeMeanEpisodes">0</strong></div><div class="hyp-metric"><label>Resolved</label><strong id="edgeMeanResolved">0</strong></div><div class="hyp-metric"><label>1h edge</label><strong id="edgeMeanEdge">—</strong></div></div><div class="evidence-track"><div class="evidence-fill" id="edgeMeanProgress"></div></div><span class="phase-tag" id="edgeMeanPhase">DESCRIPTIVE</span><div class="context-sub" id="edgeMeanMatched">matched baseline building</div></article>
-        <article class="hyp-card hyp-position"><div class="hyp-icon">03 // POSITIONING</div><div class="hyp-name">Positioning / Sentiment</div><div class="hyp-thesis">Extreme funding episodes are quarantined research. OI delta, taker ratio, basis and account skew are attached using Lab-compatible semantics.</div><div class="hyp-metrics"><div class="hyp-metric"><label>Episodes</label><strong id="edgePositioningEpisodes">0</strong></div><div class="hyp-metric"><label>Resolved</label><strong id="edgePositioningResolved">0</strong></div><div class="hyp-metric"><label>8h edge</label><strong id="edgePositioningEdge">—</strong></div></div><div class="evidence-track"><div class="evidence-fill" id="edgePositioningProgress"></div></div><span class="phase-tag" id="edgePositioningPhase">DESCRIPTIVE</span><div class="context-sub" id="edgePositioningMatched">matched baseline building</div></article>
+        <article class="hyp-card hyp-trend"><div class="hyp-icon">01 // TREND</div><div class="hyp-name">Trend / Breakout</div><div class="hyp-thesis">Donchian episode starts. SMA and MACD become explanatory features, not independent votes. Lab-style market structure is attached at the event.</div><div class="hyp-metrics"><div class="hyp-metric"><label>Episodes</label><strong id="edgeTrendEpisodes">0</strong></div><div class="hyp-metric"><label>Primary clean</label><strong id="edgeTrendResolved">0</strong></div><div class="hyp-metric"><label>4h edge</label><strong id="edgeTrendEdge">—</strong></div></div><div class="evidence-track"><div class="evidence-fill" id="edgeTrendProgress"></div></div><span class="phase-tag" id="edgeTrendPhase">DESCRIPTIVE</span><div class="context-sub" id="edgeTrendMatched">matched baseline building</div></article>
+        <article class="hyp-card hyp-mean"><div class="hyp-icon">02 // REVERSION</div><div class="hyp-name">Mean Reversion</div><div class="hyp-thesis">Raw Bollinger breach episodes. RSI, regime, volatility and volume are recorded as context so we can test whether each adds information.</div><div class="hyp-metrics"><div class="hyp-metric"><label>Episodes</label><strong id="edgeMeanEpisodes">0</strong></div><div class="hyp-metric"><label>Primary clean</label><strong id="edgeMeanResolved">0</strong></div><div class="hyp-metric"><label>1h edge</label><strong id="edgeMeanEdge">—</strong></div></div><div class="evidence-track"><div class="evidence-fill" id="edgeMeanProgress"></div></div><span class="phase-tag" id="edgeMeanPhase">DESCRIPTIVE</span><div class="context-sub" id="edgeMeanMatched">matched baseline building</div></article>
+        <article class="hyp-card hyp-position"><div class="hyp-icon">03 // POSITIONING</div><div class="hyp-name">Positioning / Sentiment</div><div class="hyp-thesis">Extreme funding episodes are quarantined research. OI delta, taker ratio, basis and account skew are attached using Lab-compatible semantics.</div><div class="hyp-metrics"><div class="hyp-metric"><label>Episodes</label><strong id="edgePositioningEpisodes">0</strong></div><div class="hyp-metric"><label>Primary clean</label><strong id="edgePositioningResolved">0</strong></div><div class="hyp-metric"><label>8h edge</label><strong id="edgePositioningEdge">—</strong></div></div><div class="evidence-track"><div class="evidence-fill" id="edgePositioningProgress"></div></div><span class="phase-tag" id="edgePositioningPhase">DESCRIPTIVE</span><div class="context-sub" id="edgePositioningMatched">matched baseline building</div></article>
       </div>
     </section>
 
     <section class="section-block" id="sec-market">
-      <div class="section-head"><div><div class="section-kicker">Context mesh</div><div class="section-name">What kind of market produced the signal?</div><div class="section-desc">Breadth is computed from the same fixed 24-coin cohort. Lab imports remain provenance-tagged historical context and are not silently mixed into fresh v44 counts.</div></div></div>
+      <div class="section-head"><div><div class="section-kicker">Context mesh</div><div class="section-name">What kind of market produced the signal?</div><div class="section-desc">Breadth is computed from the same fixed 24-coin cohort. Lab imports remain provenance-tagged historical context and are not silently mixed into fresh v44.1 counts.</div></div></div>
       <div class="context-grid">
         <div class="glass-panel context-card"><div class="context-title">Breadth state</div><div class="context-main" id="breadthState">Waiting</div><div class="context-sub" id="breadthCoverage">No closed cohort bucket yet</div><div class="context-list"><div class="context-line"><span>Market pulse</span><b id="marketPulseText">—</b></div></div></div>
         <div class="glass-panel context-card"><div class="context-title">Lab bridge</div><div class="context-main">v1.4 compatible</div><div class="context-sub" id="labBridgeStatus">No Lab archive imported yet</div><div class="context-list"><div class="context-line"><span>Basis provenance</span><b>mark-index-derived-v1</b></div><div class="context-line"><span>Old evidence</span><b>context only</b></div></div></div>
@@ -278,7 +280,7 @@ button.danger{background:rgba(72,22,39,.72);border-color:rgba(255,102,135,.35);c
     </section>
 
     <section class="section-block" id="sec-legacy">
-      <div class="section-head"><div><div class="section-kicker">Legacy sandbox</div><div class="section-name">v43 strategy engine, preserved but quarantined</div><div class="section-desc">All six legacy bots default OFF. Enable them only for deliberate paper experiments. Early Exit is preserved and defaults OFF for fresh v44 runs while its trigger is still measured.</div></div></div>
+      <div class="section-head"><div><div class="section-kicker">Legacy sandbox</div><div class="section-name">v43 strategy engine, preserved but quarantined</div><div class="section-desc">All six legacy bots default OFF. Enable them only for deliberate paper experiments. Early Exit is preserved and defaults OFF for fresh v44.1 runs while its trigger is still measured.</div></div></div>
       <div class="legacy-shell" id="legacyShell"><div class="legacy-head" id="legacyToggleBtn"><div><div class="legacy-title">Open legacy strategy controls & forensic panels</div><div class="legacy-copy">SMA · RSI · MACD · Bollinger · Donchian · Funding+Momentum</div></div><div class="legacy-chevron">⌄</div></div><div class="legacy-body">
         <div class="legacy-warning">Legacy bot results are sandbox evidence. They do not override the Edge Audit raw-signal program.</div>
         <div class="section-title">Legacy strategies for new paper entries</div><div class="toggles" id="toggleRow"></div>
@@ -315,31 +317,31 @@ button.danger{background:rgba(72,22,39,.72);border-color:rgba(255,102,135,.35);c
 
     <section class="section-block" id="sec-live"><div class="section-head"><div><div class="section-kicker">Cohort monitor</div><div class="section-name">Live coins</div><div class="section-desc">The research cohort stays visible without turning the first screen into a wall of charts.</div></div><select id="coinViewMode"><option value="hidden" selected>Hidden</option><option value="compact">Compact matrix</option><option value="full">Full cards</option></select></div><div class="grid" id="cardGrid"></div></section>
 
-    <footer class="footnote"><code>Build v44.0</code> · Research-only / paper-trading platform. The v43.13 strategy engine is preserved as an opt-in sandbox. New Edge Audit evidence is stored in a separate IndexedDB database from creation time. Lab v1.4 imports are provenance-tagged historical context and are not silently merged into fresh v44 discovery counts. Price/execution simulation remains Binance SPOT; public futures data is used only as market-structure context unless a future validated strategy explicitly says otherwise.</footer>
+    <footer class="footnote"><code>Build v44.1</code> · Research-only / paper-trading platform. The v43.13 strategy engine is preserved as an opt-in sandbox. New Edge Audit evidence is stored in a separate IndexedDB database from creation time. Lab v1.4 imports are provenance-tagged historical context and are not silently merged into fresh v44.1 discovery counts. Price/execution simulation remains Binance SPOT; public futures data is used only as market-structure context unless a future validated strategy explicitly says otherwise.</footer>
   </div></main>
 </div>
 <script>
-/* v44.0 SINGLE-FILE EMBEDDED SOURCE: js/core-engine.js */
+/* v44.1 SINGLE-FILE EMBEDDED SOURCE: js/core-engine.js */
 
 // All liquid, high-volume, with perpetual futures markets (so the funding bot
 // can actually work on them). More coins = more signals = a usable sample size
 // sooner. The exposure cap keeps total risk in check, so a wider list gives the
 // system more to choose from rather than more to pile into.
-const BUILD_TAG = "v44.0 · 2026-09-26 (Edge Audit architecture + research-first crypto command centre)";
-const BUILD_PARENT_LABEL = "v43.13";
-const BUILD_PARENT_SHA256 = "c88c74ea36b10bf0fa9d92bf4cc3228af3c4bd3f4998193082276fc8c792be3a";
-const BUILD_PARENT_MD5 = "b322ff19e551dc0125a54a7e121d436a";
-const BUILD_APPROVED_PARENT_RECORD = "v44_0_APPROVED_PARENT.json";
-const V439_INSTRUMENTATION_VERSION = "v44.0-edge1"; // legacy identifier retained for report compatibility
+const BUILD_TAG = "v44.1 · 2026-09-26 (horizon-specific evidence + matched-baseline integrity)";
+const BUILD_PARENT_LABEL = "v44.0 single-file";
+const BUILD_PARENT_SHA256 = "9c366ba6eaa7bf3265057bc8dc67c9c751dd456bbea32b9c74524e26234d14a0";
+const BUILD_PARENT_MD5 = "9ad78e51592af8927aafa6c1d8eb6347";
+const BUILD_APPROVED_PARENT_RECORD = "embedded-v44.0-single-file-parent";
+const V439_INSTRUMENTATION_VERSION = "v44.1-edge1"; // legacy identifier retained for report compatibility
 const V4313_CHANGE_LOG = [
   ["ARCH", "Research-first v44 architecture", "IMPLEMENTED", "v43.x proved the measurement stack can become more sophisticated while the six-bot strategy layer still lacks convincing edge", "Separate edge discovery from legacy paper trading; keep legacy bots available but disabled by default", "Three hypothesis families now have their own Edge Audit collector and IndexedDB evidence store; legacy strategy sandbox remains optional", "PENDING RUNTIME", "STATIC-VERIFIED"],
-  ["P0", "Early-exit live toggle", "IMPLEMENTED", "Protective-exit evidence reversed direction between small v43.12 and v43.13 samples", "Do not delete the rule; default it OFF for fresh v44 runs while measuring the counterfactual trigger", "Fresh v44 runs default early exit OFF. When OFF, the first trip-wire trigger is stored on the position and its hypothetical exit P/L is compared with the eventual real exit. Old saved runs preserve their prior behavior", "PENDING RUNTIME", "STATIC-VERIFIED"],
+  ["P0", "Early-exit live toggle", "IMPLEMENTED", "Protective-exit evidence reversed direction between small v43.12 and v43.13 samples", "Do not delete the rule; default it OFF for fresh v44.1 runs while measuring the counterfactual trigger", "Fresh v44 runs default early exit OFF. When OFF, the first trip-wire trigger is stored on the position and its hypothetical exit P/L is compared with the eventual real exit. Old saved runs preserve their prior behavior", "PENDING RUNTIME", "STATIC-VERIFIED"],
   ["P0", "Legacy strategy quarantine", "IMPLEMENTED", "SMA/MACD/Donchian overlap and repeated negative suite expectancy require raw-signal research before more live-rule tuning", "All six legacy bots remain available but default OFF; Benchmark Lock now freezes universe rather than forcing six bots ON", "DEFAULT_TOGGLES are all false and the clean-run start path accepts a research-only run", "PENDING RUNTIME", "STATIC-VERIFIED"],
   ["P0", "Edge Audit IndexedDB", "IMPLEMENTED", "v43.13 proved resolved archiving works but unresolved shadow payload can still fill localStorage", "New research evidence should be stored in IndexedDB from creation, not wait for resolution", "Raw hypothesis events, baseline snapshots, market-structure context and Lab imports use a dedicated v44 IndexedDB database; they do not consume tm2_engine localStorage", "PENDING RUNTIME", "STATIC-VERIFIED"],
   ["RESEARCH", "Trend / Breakout family", "IMPLEMENTED RESEARCH-ONLY", "Test Donchian predictive power before exits and measure whether SMA/MACD add incremental information", "Record episode-start breakout events plus SMA alignment, MACD alignment/acceleration, volume, volatility, breadth, wave context and Lab-compatible futures context", "Forward signed returns and MFE/MAE are resolved at fixed horizons without opening a paper trade", "PENDING SAMPLE", "STATIC-VERIFIED"],
   ["RESEARCH", "Mean Reversion family", "IMPLEMENTED RESEARCH-ONLY", "Separate the underlying reversal hypothesis from the restrictive live permission pipeline", "Record raw Bollinger breach episodes and attach RSI extremity, regime, volume/volatility, breadth and futures context instead of requiring those features to authorize collection", "Forward signed returns and MFE/MAE are resolved independently of stop/target/exit rules", "PENDING SAMPLE", "STATIC-VERIFIED"],
   ["RESEARCH", "Positioning / Sentiment family", "IMPLEMENTED RESEARCH-ONLY", "Funding is theoretically distinct but current Funding+Momentum implementation performed poorly", "Collect extreme-funding episodes as a quarantined research family and attach momentum, basis, OI delta, taker ratio and long/short positioning", "No live authority; forward spot outcomes determine whether the information deserves a future strategy", "PENDING SAMPLE", "STATIC-VERIFIED"],
-  ["LAB", "Research Lab bridge", "IMPLEMENTED RESEARCH-ONLY", "The Lab already provides episode governance, breadth/LFS concepts and forward-outcome methodology", "Reuse methodology without treating old Lab classifications as proven alpha", "v44 computes Lab-compatible Breadth from existing 24-coin data, fetches event-level futures microstructure using Lab semantics, and can import LAB-v1.4.0 JSON as provenance-tagged historical context excluded from fresh v44 counts by default", "PENDING RUNTIME", "STATIC-VERIFIED"],
+  ["LAB", "Research Lab bridge", "IMPLEMENTED RESEARCH-ONLY", "The Lab already provides episode governance, breadth/LFS concepts and forward-outcome methodology", "Reuse methodology without treating old Lab classifications as proven alpha", "v44 computes Lab-compatible Breadth from existing 24-coin data, fetches event-level futures microstructure using Lab semantics, and can import LAB-v1.4.0 JSON as provenance-tagged historical context excluded from fresh v44.1 counts by default", "PENDING RUNTIME", "STATIC-VERIFIED"],
   ["UI", "Crypto command-centre interface", "IMPLEMENTED", "Old UI exposed every diagnostic at once and visually centred the six legacy bots", "Make market state, evidence quality and three research families the first-screen hierarchy while preserving forensic panels", "New responsive sidebar, glass/neon research cards, market pulse, evidence progress, legacy sandbox and diagnostics drawer", "PENDING VISUAL SMOKE", "STATIC-VERIFIED"],
   ["AUDIT", "No real-money authority", "PASS", "v44 is still paper/research only", "No account/order/authenticated trading endpoints may be introduced", "Core execution remains simulated and the new Edge Audit module only uses public market-data endpoints", "PASS", "STATIC-VERIFIED"],
 ];
@@ -5302,7 +5304,7 @@ function generateReport() {
   out += `STRATEGY COMPARISON REPORT\nGenerated: ${new Date().toLocaleString()}\nRunning since: ${new Date(engine.startedAt).toLocaleString()}\n`;
   out += `Build that started this run: ${engine.startBuildTag || "(not recorded — pre-P2-3 save; current page build was " + BUILD_TAG + ")"}\n`;
   out += `Current page build: ${BUILD_TAG}${runBuildMismatch() ? " — BUILD CHANGED: new entries blocked; Reset required for a clean benchmark" : ""}\n`;
-  out += `Parent source identity: ${BUILD_PARENT_LABEL} SHA-256 ${BUILD_PARENT_SHA256} | MD5 ${BUILD_PARENT_MD5} | external approved-parent record ${BUILD_APPROVED_PARENT_RECORD}\n`;
+  out += `Parent source identity: ${BUILD_PARENT_LABEL} SHA-256 ${BUILD_PARENT_SHA256} | MD5 ${BUILD_PARENT_MD5} | approved-parent record ${BUILD_APPROVED_PARENT_RECORD}\n`;
   if (startupIntegrityBlocked) out += `STARTUP INTEGRITY WARNING: corrupted/unreadable persisted research data was detected (${startupIntegrityWarnings.map(x => x.key).join(", ")}). This state is NOT a clean benchmark baseline; verified Reset required.\n`;
   out += `Coin universe at start: ${engine.startCoinList ? engine.startCoinList.join(", ") : "(not recorded — pre-P2-3 save; current is " + coinList.join(", ") + ")"}\n`;
   out += `Auto-add at start: ${engine.startBuildTag ? (engine.startAutoAddOn ? "ON" : "OFF") : "(not recorded)"} | Fixed-universe benchmark lock: ${engine.benchmarkLock ? "ON" : "OFF"}\n`;
@@ -7181,11 +7183,11 @@ setInterval(runWideScan, WIDE_SCAN_MS);
 
 </script>
 <script>
-/* v44.0 SINGLE-FILE EMBEDDED SOURCE: js/edge-audit.js */
+/* v44.1 SINGLE-FILE EMBEDDED SOURCE: js/edge-audit.js */
 (() => {
   "use strict";
-  const VERSION = "v44.0-edge-audit-1";
-  const DB_NAME = "cryptoEdgeAudit_v44_0";
+  const VERSION = "v44.1-edge-audit-1";
+  const DB_NAME = "cryptoEdgeAudit_v44_1";
   const DB_VERSION = 1;
   const STORES = { meta:"meta", events:"events", snapshots:"snapshots", context:"context", imports:"imports", early:"earlyExit" };
   const GOV = { descriptiveMin:100, discoveryMin:300, validationMin:200, rule:"episode-start events; no adjacent-snapshot inflation", baseline:"same-coin + regime + volatility-bin + breadth-state when available" };
@@ -7200,7 +7202,7 @@ setInterval(runWideScan, WIDE_SCAN_MS);
   let dbPromise=null, busy=false, lastRenderAt=0;
   let ctxCache=new Map();
   let futGate=Promise.resolve(), lastFutAt=0;
-  const edgeApi={calls:0,ok:0,fail:0,timeouts:0,http429:0,http418:0,lastError:null};
+  const edgeApi={calls:0,ok:0,fail:0,expectedUnavailable:0,noMarketCoins:{},timeouts:0,http429:0,http418:0,lastError:null};
 
   function now(){return Date.now()}
   function median(a){const b=a.filter(Number.isFinite).sort((x,y)=>x-y);if(!b.length)return null;const m=Math.floor(b.length/2);return b.length%2?b[m]:(b[m-1]+b[m])/2}
@@ -7276,15 +7278,18 @@ setInterval(runWideScan, WIDE_SCAN_MS);
   }
 
   async function paceFutures(){let release;const prior=futGate;futGate=new Promise(r=>release=r);await prior;try{const wait=Math.max(0,lastFutAt+300-now());if(wait)await new Promise(r=>setTimeout(r,wait));lastFutAt=now()}finally{release()}}
-  async function fetchJson(url,timeout=5000){if(url.startsWith(FUT))await paceFutures();const c=new AbortController(),tm=setTimeout(()=>c.abort(),timeout);edgeApi.calls++;try{const r=await fetch(url,{signal:c.signal,cache:"no-store"});if(r.status===429)edgeApi.http429++;if(r.status===418)edgeApi.http418++;if(!r.ok)throw new Error(`HTTP ${r.status}`);const j=await r.json();edgeApi.ok++;return j}catch(e){edgeApi.fail++;if(e?.name==="AbortError")edgeApi.timeouts++;edgeApi.lastError=String(e?.message||e);throw e}finally{clearTimeout(tm)}}
+  async function fetchJson(url,timeout=5000,opts={}){if(url.startsWith(FUT))await paceFutures();const c=new AbortController(),tm=setTimeout(()=>c.abort(),timeout);edgeApi.calls++;try{const r=await fetch(url,{signal:c.signal,cache:"no-store"});if(r.status===429)edgeApi.http429++;if(r.status===418)edgeApi.http418++;if(r.status===400&&opts.allowBadSymbol){let body=null;try{body=await r.json()}catch{}if(body&&Number(body.code)===-1121){edgeApi.expectedUnavailable++;if(opts.coin)edgeApi.noMarketCoins[opts.coin]=true;return {__edgeExpectedUnavailable:true,reason:"no_futures_market",coin:opts.coin||null}}}if(!r.ok)throw new Error(`HTTP ${r.status}`);const j=await r.json();edgeApi.ok++;return j}catch(e){edgeApi.fail++;if(e?.name==="AbortError")edgeApi.timeouts++;edgeApi.lastError=String(e?.message||e);throw e}finally{clearTimeout(tm)}}
   async function marketContext(coin){
     const cache=ctxCache.get(coin);if(cache&&now()-cache.at<5*60*1000)return cache.value;
     const sym=coin+"USDT",q=encodeURIComponent(sym);
+    const legacyNoMarket=!!(engine?.apiHealth?.trackedFundingNoMarketCoins?.[coin]);
     const urls={oi:`${FUT}/futures/data/openInterestHist?symbol=${q}&period=5m&limit=3`,taker:`${FUT}/futures/data/takerlongshortRatio?symbol=${q}&period=5m&limit=3`,ls:`${FUT}/futures/data/globalLongShortAccountRatio?symbol=${q}&period=5m&limit=3`,premium:`${FUT}/fapi/v1/premiumIndex?symbol=${q}`};
-    const keys=Object.keys(urls),res=await Promise.allSettled(keys.map(k=>fetchJson(urls[k]))),d={};res.forEach((r,i)=>{if(r.status==="fulfilled")d[keys[i]]=r.value});
+    const keys=Object.keys(urls),res=await Promise.allSettled(keys.map(k=>legacyNoMarket&&k==="premium"?Promise.resolve({__edgeExpectedUnavailable:true,reason:"no_futures_market",coin}):fetchJson(urls[k],5000,{allowBadSymbol:k==="premium",coin}))),d={};let expectedNoMarket=legacyNoMarket;
+    res.forEach((r,i)=>{if(r.status==="fulfilled"){const v=r.value;if(v&&v.__edgeExpectedUnavailable)expectedNoMarket=true;else d[keys[i]]=v}});
+    if(legacyNoMarket){edgeApi.noMarketCoins[coin]=true}
     const oi=Array.isArray(d.oi)?d.oi:[],cur=oi.at(-1),prev=oi.at(-2);const oc=cur?Number(cur.sumOpenInterestValue):NaN,op=prev?Number(prev.sumOpenInterestValue):NaN,oiD=Number.isFinite(oc)&&Number.isFinite(op)&&op?(oc/op-1)*100:null;
     const tk=Array.isArray(d.taker)?d.taker.at(-1):null,ls=Array.isArray(d.ls)?d.ls.at(-1):null,p=d.premium&&typeof d.premium==="object"?d.premium:null;const mark=p?Number(p.markPrice):NaN,index=p?Number(p.indexPrice):NaN,basis=Number.isFinite(mark)&&Number.isFinite(index)?mark-index:null,basisRate=Number.isFinite(basis)&&Number.isFinite(index)&&index?basis/index:null;
-    const value={at:now(),coin,clean:!!(cur&&prev&&tk&&ls&&p),missing:keys.filter(k=>!d[k]),oi:oc,oiDeltaPct:oiD,takerRatio:tk?Number(tk.buySellRatio):null,buyVol:tk?Number(tk.buyVol):null,sellVol:tk?Number(tk.sellVol):null,longShortRatio:ls?Number(ls.longShortRatio):null,longAccount:ls?Number(ls.longAccount):null,shortAccount:ls?Number(ls.shortAccount):null,fundingPct:p?Number(p.lastFundingRate)*100:null,basis,basisRate,basisSource:"premium-mark-index-derived-v1",mark,index,premiumTime:p?Number(p.time):null};
+    const missing=keys.filter(k=>!d[k]);const value={at:now(),coin,clean:!!(cur&&prev&&tk&&ls&&(p||expectedNoMarket)),expectedUnavailable:expectedNoMarket?["premium"]:[],noFuturesMarket:expectedNoMarket,missing,oi:oc,oiDeltaPct:oiD,takerRatio:tk?Number(tk.buySellRatio):null,buyVol:tk?Number(tk.buyVol):null,sellVol:tk?Number(tk.sellVol):null,longShortRatio:ls?Number(ls.longShortRatio):null,longAccount:ls?Number(ls.longAccount):null,shortAccount:ls?Number(ls.shortAccount):null,fundingPct:p?Number(p.lastFundingRate)*100:null,basis,basisRate,basisSource:"premium-mark-index-derived-v1",mark,index,premiumTime:p?Number(p.time):null};
     ctxCache.set(coin,{at:now(),value});return value;
   }
 
@@ -7320,27 +7325,30 @@ setInterval(runWideScan, WIDE_SCAN_MS);
   }
 
   function resolveFromState(rec,h){const s=state[rec.coin];if(!s||!Array.isArray(s.closes)||!Array.isArray(s.times))return null;const target=rec.eventAt+h*60*1000;const limit=s.closes.length-1;let term=-1;for(let i=0;i<limit;i++){const closeAt=Number(s.times[i])+FIFTEEN-1;if(closeAt>=target){term=i;break}}if(term<0)return null;let start=-1;for(let i=0;i<limit;i++){if(Number(s.times[i])+FIFTEEN-1>=rec.eventAt){start=i;break}}if(start<0||term<start)return null;const terminal=s.closes[term],signed=rec.side==="Long"?(terminal/rec.entryPrice-1)*100:(rec.entryPrice/terminal-1)*100;let mfe=-Infinity,mae=-Infinity;for(let i=start;i<=term;i++){const hi=s.highs[i],lo=s.lows[i];if(rec.side==="Long"){mfe=Math.max(mfe,(hi/rec.entryPrice-1)*100);mae=Math.max(mae,(rec.entryPrice/lo-1)*100)}else{mfe=Math.max(mfe,(rec.entryPrice/lo-1)*100);mae=Math.max(mae,(hi/rec.entryPrice-1)*100)}}return {retPct:signed,mfePct:Number.isFinite(mfe)?mfe:null,maePct:Number.isFinite(mae)?mae:null,terminalPrice:terminal,terminalAt:Number(s.times[term])+FIFTEEN-1,precision:"closed-15m"}}
+  function segmentForTime(at){const segs=engine?.evidenceGovernor?.segments||[];for(const s of segs){const start=Number(s.startAt),end=s.endAt==null?Infinity:Number(s.endAt);if(Number.isFinite(start)&&at>=start&&at<=end)return s.id}return null}
+  function horizonQuality(rec,o){const start=Number(rec.eventAt),end=Number(o?.terminalAt);const gaps=(engine?.evidenceGovernor?.gaps||[]).filter(g=>Number.isFinite(g.eventAt)&&g.eventAt>start&&g.eventAt<=end);const incidents=(engine?.dataQualityGovernor?.incidents||[]).filter(d=>{if(!Number.isFinite(d.eventAt)||d.eventAt<=start||d.eventAt>end)return false;const affected=[...(d.failedCoins||[]),...(d.staleCoins||[])];return !affected.length||affected.includes(rec.coin)});return {segmentIdAtTerminal:segmentForTime(end),cadenceContaminated:gaps.length>0,dataQualityContaminated:incidents.length>0,contaminated:gaps.length>0||incidents.length>0,gapIds:gaps.map(g=>g.id),dqIds:incidents.map(d=>d.id)}}
+  function decorateOutcome(rec,o){return o?{...o,...horizonQuality(rec,o)}:o}
   async function resolvePending(){
-    const evs=await all(STORES.events);for(const ev of evs){if(ev.runId!==currentRunId()||ev.status!=="pending")continue;for(const h of HORIZONS[ev.family])if(!ev.outcomes[h]){const o=resolveFromState(ev,h);if(o)ev.outcomes[h]=o}if(HORIZONS[ev.family].every(h=>ev.outcomes[h])){ev.status="resolved";const seg=currentSegment();ev.segmentIdAtResolution=seg;ev.cadenceContaminated=Number.isFinite(ev.segmentIdAtEntry)&&Number.isFinite(seg)&&seg!==ev.segmentIdAtEntry}await put(STORES.events,ev)}
-    const snaps=await all(STORES.snapshots);for(const s of snaps){if(s.runId!==currentRunId()||s.status!=="pending")continue;for(const h of ALL_BASELINE_HORIZONS)if(!s.outcomes[h]){const fake={...s,side:"Long"};const o=resolveFromState(fake,h);if(o)s.outcomes[h]={retPct:o.retPct,mfePct:o.mfePct,maePct:o.maePct,terminalAt:o.terminalAt}}if(ALL_BASELINE_HORIZONS.every(h=>s.outcomes[h]))s.status="resolved";await put(STORES.snapshots,s)}
+    const evs=await all(STORES.events);for(const ev of evs){if(ev.runId!==currentRunId()||ev.status==="resolved")continue;for(const h of HORIZONS[ev.family])if(!ev.outcomes[h]){const o=resolveFromState(ev,h);if(o)ev.outcomes[h]=decorateOutcome(ev,o)}if(HORIZONS[ev.family].every(h=>ev.outcomes[h])){ev.status="resolved";ev.segmentIdAtResolution=currentSegment();ev.cadenceContaminated=HORIZONS[ev.family].some(h=>!!ev.outcomes?.[h]?.cadenceContaminated);ev.dataQualityContaminated=HORIZONS[ev.family].some(h=>!!ev.outcomes?.[h]?.dataQualityContaminated)}await put(STORES.events,ev)}
+    const snaps=await all(STORES.snapshots);for(const s of snaps){if(s.runId!==currentRunId()||s.status==="resolved")continue;for(const h of ALL_BASELINE_HORIZONS)if(!s.outcomes[h]){const fake={...s,side:"Long"};const o=resolveFromState(fake,h);if(o)s.outcomes[h]=decorateOutcome(fake,{retPct:o.retPct,mfePct:o.mfePct,maePct:o.maePct,terminalAt:o.terminalAt,terminalPrice:o.terminalPrice,precision:o.precision})}if(ALL_BASELINE_HORIZONS.every(h=>s.outcomes[h]))s.status="resolved";await put(STORES.snapshots,s)}
   }
 
   async function onCycleComplete(){if(busy||!engine||!engine.edgeAuditMode)return;busy=true;try{const m=await meta();if(m.runId!==currentRunId())await startRun(engine);const mm=await meta();const freshCoins=DEFAULT_COINS.map(c=>state[c]).filter(s=>s&&Array.isArray(s.times)&&s.times.length>2&&isFreshState(s));if(!freshCoins.length)return;const buckets=freshCoins.map(s=>Number(s.times[s.times.length-2])).filter(Number.isFinite);const bucket=median(buckets);if(Number.isFinite(bucket)&&bucket!==mm.lastBucket){await collectBucket(mm,bucket);mm.lastBucket=bucket;await saveMeta(mm)}await resolvePending();await render();}catch(e){try{const m=await meta();m.errors=(m.errors||0)+1;m.lastError=String(e?.message||e);await saveMeta(m)}catch{}console.error("Edge Audit",e)}finally{busy=false}}
 
-  async function matchedBaseline(ev,h,snapshots){const candidates=snapshots.filter(s=>s.status==="resolved"&&s.coin===ev.coin&&s.outcomes?.[h]&&s.regime===ev.features?.regime&&s.volatilityBin===ev.features?.volatilityBin&&(!ev.breadth?.state||s.breadthState===ev.breadth.state));if(candidates.length<8)return {n:candidates.length,avg:null};return {n:candidates.length,avg:mean(candidates.map(x=>{const r=x.outcomes[h].retPct;return ev.side==="Long"?r:-r}))}}
+  async function matchedBaseline(ev,h,snapshots){const candidates=snapshots.filter(s=>s.coin===ev.coin&&s.bucket!==ev.bucket&&s.outcomes?.[h]&&!s.outcomes[h].contaminated&&s.regime===ev.features?.regime&&s.volatilityBin===ev.features?.volatilityBin&&(!ev.breadth?.state||s.breadthState===ev.breadth.state));if(candidates.length<8)return {n:candidates.length,avg:null};return {n:candidates.length,avg:mean(candidates.map(x=>{const r=x.outcomes[h].retPct;return ev.side==="Long"?r:-r}))}}
   function primaryHorizon(f){return f==="trend"?240:f==="mean"?60:480}
-  async function summary(){const rid=currentRunId(),evs=(await all(STORES.events)).filter(x=>x.runId===rid),snaps=(await all(STORES.snapshots)).filter(x=>x.runId===rid),m=await meta();const out={runId:rid,meta:m,families:{},snapshots:snaps.length};for(const family of ["trend","mean","positioning"]){const a=evs.filter(x=>x.family===family),resolved=a.filter(x=>x.status==="resolved"&&!x.cadenceContaminated),h=primaryHorizon(family),withH=resolved.filter(x=>x.outcomes?.[h]);const rs=withH.map(x=>x.outcomes[h].retPct);let excess=[];for(const ev of withH){const b=await matchedBaseline(ev,h,snaps);if(Number.isFinite(b.avg))excess.push(ev.outcomes[h].retPct-b.avg)}out.families[family]={episodes:a.length,resolved:resolved.length,primaryHorizon:h,avgRet:mean(rs),positive:rs.length?rs.filter(x=>x>0).length/rs.length:null,avgMfe:mean(withH.map(x=>x.outcomes[h].mfePct)),avgMae:mean(withH.map(x=>x.outcomes[h].maePct)),matchedExcess:mean(excess),matchedN:excess.length,phase:a.length<100?"DESCRIPTIVE":a.length<300?"BUILDING DISCOVERY":"DISCOVERY SAMPLE READY"}}return out}
+  async function summary(){const rid=currentRunId(),evs=(await all(STORES.events)).filter(x=>x.runId===rid),snaps=(await all(STORES.snapshots)).filter(x=>x.runId===rid),m=await meta();const out={runId:rid,meta:m,families:{},snapshots:snaps.length};for(const family of ["trend","mean","positioning"]){const a=evs.filter(x=>x.family===family),h=primaryHorizon(family),primaryReady=a.filter(x=>x.outcomes?.[h]),withH=primaryReady.filter(x=>!x.outcomes[h].contaminated),rs=withH.map(x=>x.outcomes[h].retPct);let excess=[],baselineCandidateN=[];for(const ev of withH){const b=await matchedBaseline(ev,h,snaps);baselineCandidateN.push(b.n);if(Number.isFinite(b.avg))excess.push(ev.outcomes[h].retPct-b.avg)}const cleanN=withH.length;out.families[family]={episodes:a.length,resolved:cleanN,primaryReady:primaryReady.length,primaryContaminated:primaryReady.length-cleanN,fullyResolved:a.filter(x=>x.status==="resolved").length,primaryHorizon:h,avgRet:mean(rs),positive:rs.length?rs.filter(x=>x>0).length/rs.length:null,avgMfe:mean(withH.map(x=>x.outcomes[h].mfePct)),avgMae:mean(withH.map(x=>x.outcomes[h].maePct)),matchedExcess:mean(excess),matchedN:excess.length,baselineCandidatesMax:baselineCandidateN.length?Math.max(...baselineCandidateN):0,phase:cleanN<100?"DESCRIPTIVE":cleanN<300?"BUILDING DISCOVERY":"DISCOVERY SAMPLE READY"}}return out}
 
-  async function render(force=false){if(!force&&now()-lastRenderAt<4000)return;lastRenderAt=now();const s=await summary();for(const family of ["trend","mean","positioning"]){const x=s.families[family],p=Math.min(100,x.episodes/GOV.discoveryMin*100);const q=id=>document.getElementById(id);const pre=family==="trend"?"edgeTrend":family==="mean"?"edgeMean":"edgePositioning";if(q(pre+"Episodes"))q(pre+"Episodes").textContent=x.episodes;if(q(pre+"Resolved"))q(pre+"Resolved").textContent=x.resolved;if(q(pre+"Edge"))q(pre+"Edge").textContent=Number.isFinite(x.avgRet)?pct(x.avgRet,2):"—";if(q(pre+"Progress"))q(pre+"Progress").style.width=p+"%";if(q(pre+"Phase"))q(pre+"Phase").textContent=x.phase;if(q(pre+"Matched"))q(pre+"Matched").textContent=Number.isFinite(x.matchedExcess)?`matched excess ${pct(x.matchedExcess,2)} · n=${x.matchedN}`:`matched baseline building · n=${x.matchedN}`}
+  async function render(force=false){if(!force&&now()-lastRenderAt<4000)return;lastRenderAt=now();const s=await summary();for(const family of ["trend","mean","positioning"]){const x=s.families[family],p=Math.min(100,x.resolved/GOV.discoveryMin*100);const q=id=>document.getElementById(id);const pre=family==="trend"?"edgeTrend":family==="mean"?"edgeMean":"edgePositioning";if(q(pre+"Episodes"))q(pre+"Episodes").textContent=x.episodes;if(q(pre+"Resolved"))q(pre+"Resolved").textContent=x.resolved;if(q(pre+"Edge"))q(pre+"Edge").textContent=Number.isFinite(x.avgRet)?pct(x.avgRet,2):"—";if(q(pre+"Progress"))q(pre+"Progress").style.width=p+"%";if(q(pre+"Phase"))q(pre+"Phase").textContent=x.phase;if(q(pre+"Matched"))q(pre+"Matched").textContent=Number.isFinite(x.matchedExcess)?`matched excess ${pct(x.matchedExcess,2)} · n=${x.matchedN}`:`matched baseline building · usable candidates up to ${x.baselineCandidatesMax||0}`}
     const m=s.meta,q=id=>document.getElementById(id);if(q("edgeAuditStatus"))q("edgeAuditStatus").textContent=m.runId?`EDGE AUDIT ACTIVE · ${s.snapshots} baseline snapshots · ${m.errors||0} research errors`:"EDGE AUDIT READY";
     const ctx=(await all(STORES.context)).filter(x=>x.runId===currentRunId()&&x.kind==="breadth").sort((a,b)=>(b.bucket||0)-(a.bucket||0))[0];if(ctx){if(q("breadthState"))q("breadthState").textContent=ctx.state;if(q("breadthCoverage"))q("breadthCoverage").textContent=`${Math.round((ctx.coverage||0)*100)}% cohort · ${Math.round((ctx.up||0)*100)}% up`;if(q("marketPulseText"))q("marketPulseText").textContent=`${ctx.state} · median ${pct(ctx.med||0,2)} · BTC ${pct(ctx.btc||0,2)}`}
-    const imports=await all(STORES.imports);if(q("labBridgeStatus"))q("labBridgeStatus").textContent=imports.length?`${imports.length} Lab import(s) stored · historical context separated from fresh v44 counts`:"No Lab archive imported yet · live Breadth methodology active";
+    const imports=await all(STORES.imports);if(q("labBridgeStatus"))q("labBridgeStatus").textContent=imports.length?`${imports.length} Lab import(s) stored · historical context separated from fresh v44.1 counts`:"No Lab archive imported yet · live Breadth methodology active";
     updateTrust();
   }
   function updateTrust(){const q=id=>document.getElementById(id);if(!engine){if(q("trustScore"))q("trustScore").textContent="READY";return}const h=typeof ensureApiHealth==="function"?ensureApiHealth():null;const full=h&&h.cyclesCompleted?h.fullSyncCycles/h.cyclesCompleted:1,integrity=!persistenceDegraded&&!startupIntegrityBlocked,segment=currentSegment();let score=Math.round(Math.max(0,Math.min(100,full*70+(integrity?20:0)+(segment?10:0))));if(q("trustScore"))q("trustScore").textContent=String(score);if(q("trustApiBar"))q("trustApiBar").style.width=Math.round(full*100)+"%";if(q("trustApiVal"))q("trustApiVal").textContent=Math.round(full*100)+"%";if(q("trustPersistBar"))q("trustPersistBar").style.width=integrity?"100%":"20%";if(q("trustPersistVal"))q("trustPersistVal").textContent=integrity?"OK":"WARN";if(q("trustSegmentVal"))q("trustSegmentVal").textContent=segment?`S${segment}`:"—"}
 
-  async function exportJson(){const payload={schema:"V44-EDGE-AUDIT-1",exportedAt:now(),build:BUILD_TAG,governor:GOV,edgeApi:{...edgeApi},meta:await meta(),summary:await summary(),events:(await all(STORES.events)).filter(x=>x.runId===currentRunId()),snapshots:(await all(STORES.snapshots)).filter(x=>x.runId===currentRunId()),context:(await all(STORES.context)).filter(x=>x.runId===currentRunId()),earlyExit:(await all(STORES.early)).filter(x=>x.runId===currentRunId()),imports:await all(STORES.imports)};download(`edge_audit_${new Date().toISOString().slice(0,10)}.json`,JSON.stringify(payload,null,2),"application/json")}
-  async function exportCsv(){const ev=(await all(STORES.events)).filter(x=>x.runId===currentRunId());const rows=[["id","family","coin","side","eventAt","episodeId","status","segmentEntry","segmentResolution","cadenceContaminated","regime","atrPct","volRatio","rsi","macdHist","smaAligned","macdAligned","macdAccelerating","fundingPct","breadthState","oiDeltaPct","takerRatio","basisRate","ret15","ret30","ret60","ret120","ret240","ret480","ret1440"]];for(const e of ev)rows.push([e.id,e.family,e.coin,e.side,e.eventAt,e.episodeId,e.status,e.segmentIdAtEntry,e.segmentIdAtResolution,e.cadenceContaminated,e.features?.regime,e.features?.atrPct,e.features?.volRatio,e.features?.rsi,e.features?.macdHist,e.features?.smaAligned,e.features?.macdAligned,e.features?.macdAccelerating,e.features?.fundingPct,e.breadth?.state,e.marketStructure?.oiDeltaPct,e.marketStructure?.takerRatio,e.marketStructure?.basisRate,...[15,30,60,120,240,480,1440].map(h=>e.outcomes?.[h]?.retPct??"")]);download(`edge_audit_${new Date().toISOString().slice(0,10)}.csv`,rows.map(r=>r.map(csv).join(",")).join("\n"),"text/csv")}
+  async function exportJson(){const payload={schema:"V44.1-EDGE-AUDIT-1",exportedAt:now(),build:BUILD_TAG,governor:GOV,edgeApi:{...edgeApi},meta:await meta(),summary:await summary(),events:(await all(STORES.events)).filter(x=>x.runId===currentRunId()),snapshots:(await all(STORES.snapshots)).filter(x=>x.runId===currentRunId()),context:(await all(STORES.context)).filter(x=>x.runId===currentRunId()),earlyExit:(await all(STORES.early)).filter(x=>x.runId===currentRunId()),imports:await all(STORES.imports)};download(`edge_audit_${new Date().toISOString().slice(0,10)}.json`,JSON.stringify(payload,null,2),"application/json")}
+  async function exportCsv(){const ev=(await all(STORES.events)).filter(x=>x.runId===currentRunId());const rows=[["id","family","coin","side","eventAt","episodeId","status","segmentEntry","segmentResolution","cadenceContaminated","dataQualityContaminated","regime","atrPct","volRatio","rsi","macdHist","smaAligned","macdAligned","macdAccelerating","fundingPct","breadthState","oiDeltaPct","takerRatio","basisRate","ret15","ret30","ret60","ret120","ret240","ret480","ret1440","clean15","clean30","clean60","clean120","clean240","clean480","clean1440"]];for(const e of ev)rows.push([e.id,e.family,e.coin,e.side,e.eventAt,e.episodeId,e.status,e.segmentIdAtEntry,e.segmentIdAtResolution,e.cadenceContaminated,e.dataQualityContaminated,e.features?.regime,e.features?.atrPct,e.features?.volRatio,e.features?.rsi,e.features?.macdHist,e.features?.smaAligned,e.features?.macdAligned,e.features?.macdAccelerating,e.features?.fundingPct,e.breadth?.state,e.marketStructure?.oiDeltaPct,e.marketStructure?.takerRatio,e.marketStructure?.basisRate,...[15,30,60,120,240,480,1440].map(h=>e.outcomes?.[h]?.retPct??""),...[15,30,60,120,240,480,1440].map(h=>e.outcomes?.[h]?(!e.outcomes[h].contaminated):"")]);download(`edge_audit_${new Date().toISOString().slice(0,10)}.csv`,rows.map(r=>r.map(csv).join(",")).join("\n"),"text/csv")}
   function csv(v){if(v===null||v===undefined)return"";const s=String(v);return /[",\n]/.test(s)?`"${s.replace(/"/g,'""')}"`:s}
   function download(name,text,type){const b=new Blob([text],{type}),u=URL.createObjectURL(b),a=document.createElement("a");a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),2000)}
 
@@ -7348,16 +7356,17 @@ setInterval(runWideScan, WIDE_SCAN_MS);
   async function recordEarlyExitTrigger(x){const rid=currentRunId();if(!rid)return;await put(STORES.early,{id:id("EEX",rid,x.bot,x.coin,x.side,x.triggeredAt),runId:rid,...x,mode:"trigger-only-live-off",status:"triggered"})}
   async function recordEarlyExitOutcome(x){const rid=currentRunId();if(!rid||!x?.triggeredAt)return;const key=id("EEX",rid,x.bot,x.coin,x.side,x.triggeredAt),prev=await get(STORES.early,key);await put(STORES.early,{...(prev||{id:key,runId:rid,bot:x.bot,coin:x.coin,side:x.side,triggeredAt:x.triggeredAt}),...x,status:"resolved",mode:"live-off-counterfactual"})}
 
-  function bind(){document.getElementById("edgeExportJsonBtn")?.addEventListener("click",()=>exportJson().catch(e=>alert(e.message)));document.getElementById("edgeExportCsvBtn")?.addEventListener("click",()=>exportCsv().catch(e=>alert(e.message)));document.getElementById("labImportInput")?.addEventListener("change",async e=>{const f=e.target.files?.[0];if(!f)return;try{const r=await importLabFile(f);alert(`Lab import stored: ${r.lfsResolved} LFS + ${r.breadthResolved} Breadth resolved records. Historical context is kept separate from fresh v44 evidence.`)}catch(err){alert(`Lab import failed: ${err.message}`)}finally{e.target.value=""}});document.getElementById("legacyToggleBtn")?.addEventListener("click",()=>document.getElementById("legacyShell")?.classList.toggle("open"));}
+  function bind(){document.getElementById("edgeExportJsonBtn")?.addEventListener("click",()=>exportJson().catch(e=>alert(e.message)));document.getElementById("edgeExportCsvBtn")?.addEventListener("click",()=>exportCsv().catch(e=>alert(e.message)));document.getElementById("overviewEdgeJsonBtn")?.addEventListener("click",()=>exportJson().catch(e=>alert(e.message)));document.getElementById("overviewEdgeCsvBtn")?.addEventListener("click",()=>exportCsv().catch(e=>alert(e.message)));document.getElementById("overviewStartBtn")?.addEventListener("click",()=>document.getElementById("engineStartBtn")?.click());document.getElementById("labImportInput")?.addEventListener("change",async e=>{const f=e.target.files?.[0];if(!f)return;try{const r=await importLabFile(f);alert(`Lab import stored: ${r.lfsResolved} LFS + ${r.breadthResolved} Breadth resolved records. Historical context is kept separate from fresh v44.1 evidence.`)}catch(err){alert(`Lab import failed: ${err.message}`)}finally{e.target.value=""}});document.getElementById("legacyToggleBtn")?.addEventListener("click",()=>document.getElementById("legacyShell")?.classList.toggle("open"));}
   window.EdgeAudit={version:VERSION,startRun,resetRun,onCycleComplete,render,summary,exportJson,exportCsv,importLabFile,recordEarlyExitTrigger,recordEarlyExitOutcome,edgeApi};
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",()=>{bind();render(true)});else{bind();render(true)}
 })();
 
 </script>
 <script>
-/* v44.0 SINGLE-FILE EMBEDDED SOURCE: js/ui-v44.js */
+/* v44.1 SINGLE-FILE EMBEDDED SOURCE: js/ui-v44.js */
 (() => {
   const $=id=>document.getElementById(id);
+  function syncOverviewControls(){const b=$("overviewStartBtn");if(!b)return;const started=!!(typeof engine!=="undefined"&&engine&&engine.startedAt);b.textContent=started?"↻ Restart Edge Audit":"▶ Start Edge Audit";}
   function refreshMarketPulse(){
     try{
       const rows=DEFAULT_COINS.map(c=>({c,s:state[c]})).filter(x=>x.s&&isFreshState(x.s)&&x.s.price);
@@ -7368,7 +7377,7 @@ setInterval(runWideScan, WIDE_SCAN_MS);
       if($("marketRegimeSub"))$("marketRegimeSub").textContent=`${bull} bull · ${bear} bear · ${mixed} mixed · ${rows.length}/${DEFAULT_COINS.length} fresh`;
     }catch{}
   }
-  setInterval(refreshMarketPulse,4000);setTimeout(refreshMarketPulse,500);
+  setInterval(()=>{refreshMarketPulse();syncOverviewControls()},4000);setTimeout(()=>{refreshMarketPulse();syncOverviewControls()},500);
 })();
 
 </script>
